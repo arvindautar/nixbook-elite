@@ -19,9 +19,11 @@ let
         {
           imports = [ "${modulesPath}/testing/test-instrumentation.nix" ];
           boot.initrd.availableKernelModules = [ "virtio_console" ];
-          # Only difference to the real system: the LUKS prompt goes to the serial
-          # console (instead of Plymouth's graphics) so the test can answer it.
+          # The LUKS prompt goes to the serial console so the test can answer it.
           boot.plymouth.enable = lib.mkForce false;
+          # This VM has no network. Don't retry Flathub for the whole test.
+          systemd.services.flatpak-managed-install.serviceConfig.Restart = lib.mkForce "no";
+          systemd.services.nixbook-gradia-capture.serviceConfig.Restart = lib.mkForce "no";
         }
       )
     ];
@@ -66,7 +68,7 @@ pkgs.testers.runNixOSTest {
     };
 
   testScript = ''
-    import os, shutil, subprocess
+    import os, select, shutil, subprocess
 
     disk = os.path.join(installer.state_dir, "nvme.qcow2")
     subprocess.run(["${pkgs.qemu_kvm}/bin/qemu-img", "create", "-f", "qcow2", disk, "24G"], check=True)
@@ -101,12 +103,27 @@ pkgs.testers.runNixOSTest {
         laptop.wait_for_console_text("Please enter passphrase for disk")
         laptop.send_console("${luks}\n")
 
+    def drop_stale_shell():
+        # Boot 1's backdoor banner stays in the virtio-console buffer across
+        # the reboot. connect() would treat that old banner as a live shell
+        # and then read the Secure Boot enroll screen as a command result.
+        laptop.connected = False
+        if laptop.shell is None:
+            return
+        while True:
+            ready, _, _ = select.select([laptop.shell], [], [], 0.2)
+            if not ready:
+                break
+            if not laptop.shell.recv(4096):
+                break
+
     with subtest("boot 1: unlock, keys generated + prepared, automatic reboot"):
         # allow_reboot keeps QEMU alive across the lanzaboote reboot. The
         # kernel prints "Restarting system" (no "reboot:" prefix).
         laptop.start(allow_reboot=True)
         unlock()
         laptop.wait_for_console_text("Restarting system")
+        drop_stale_shell()
 
     with subtest("boot 2: systemd-boot enrolls the keys and resets; boot 3: Secure Boot on"):
         unlock()
