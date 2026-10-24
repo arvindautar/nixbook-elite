@@ -4,8 +4,35 @@
 let
   # `nixbook-secureboot` shows whose keys the firmware holds and what to do next.
   # HP Sure Start silently restores the factory keys after the boot loader enrolls
-  # its own, so it must be off before enrolling. `enroll` is a manual fallback
-  # for the automatic enrollment done by systemd-boot.
+  # its own, so it must be off before enrolling. `nixbook-enroll` is the manual
+  # fallback for the automatic enrollment done by lanzaboote. No disk PIN.
+  enroll = pkgs.writeShellScriptBin "nixbook-enroll" ''
+    set -euo pipefail
+    [ "$(id -u)" = 0 ] || exec sudo "$0" "$@"
+    efivar() {
+      f=/sys/firmware/efi/efivars/$1
+      [ -e "$f" ] && ${pkgs.coreutils}/bin/od -An -t u1 -j4 -N1 "$f" | tr -d ' ' || echo 0
+    }
+    hpattr() {
+      cat "/sys/class/firmware-attributes/hp-bioscfg/attributes/$1/current_value" 2>/dev/null || echo "?"
+    }
+    setupmode=$(efivar SetupMode-8be4df61-93ca-11d2-aa0d-00e098032b8c)
+    protection=$(hpattr "Sure Start Secure Boot Keys Protection")
+    [ "$setupmode" = 1 ] || {
+      echo "Firmware staat niet in Setup Mode; zie 'nixbook-secureboot'."
+      exit 1
+    }
+    if [ "$protection" = Enable ]; then
+      echo "Zet eerst 'Sure Start Secure Boot Keys Protection' uit in het BIOS,"
+      echo "anders zet HP de fabriekssleutels terug."
+      exit 1
+    fi
+    ${pkgs.sbctl}/bin/sbctl enroll-keys --microsoft
+    echo
+    echo "Ingeschreven. Herstart, zet Secure Boot aan in het BIOS (F10) en controleer"
+    echo "daarna met 'bootctl status': Secure Boot: enabled (user)."
+  '';
+
   secureBootTool = pkgs.writeShellScriptBin "nixbook-secureboot" ''
     efivar() { # name-guid -> value of the 5th byte (after the 4 attribute bytes)
       f=/sys/firmware/efi/efivars/$1
@@ -55,8 +82,8 @@ let
           echo "Je eigen sleutels staan in de firmware. Zet nu Secure Boot aan:"
           echo "  F10 -> Beveiliging -> Secure Boot-configuratie -> Secure Boot inschakelen."
         elif [ "$setupmode" = 1 ]; then
-          echo "Firmware staat in Setup Mode. Herstart: systemd-boot schrijft de sleutels in"
-          echo "(15 seconden aftellen). Of nu direct: sudo nixbook-secureboot enroll"
+          echo "Firmware staat in Setup Mode. Herstart: de sleutels worden automatisch"
+          echo "ingeschreven (15 seconden aftellen). Of nu direct: sudo nixbook-enroll"
         else
           echo "De firmware heeft de HP-fabriekssleutels: zet Secure Boot NIET aan, dan start"
           echo "nixbook niet. Eerst in het BIOS (F10):"
@@ -68,27 +95,21 @@ let
         fi
         ;;
       enroll)
-        [ "$(id -u)" = 0 ] || exec sudo "$0" enroll
-        [ "$setupmode" = 1 ] || { echo "Firmware staat niet in Setup Mode; zie 'nixbook-secureboot'."; exit 1; }
-        if [ "$protection" = Enable ]; then
-          echo "Zet eerst 'Sure Start Secure Boot Keys Protection' uit in het BIOS,"
-          echo "anders zet HP de fabriekssleutels terug."
-          exit 1
-        fi
-        ${pkgs.sbctl}/bin/sbctl enroll-keys --microsoft
-        echo
-        echo "Ingeschreven. Herstart, zet Secure Boot aan in het BIOS (F10) en controleer"
-        echo "daarna met 'bootctl status': Secure Boot: enabled (user)."
+        exec ${enroll}/bin/nixbook-enroll
         ;;
       *)
         echo "Gebruik: nixbook-secureboot [status|enroll]"
+        echo "Sleutels inschrijven: sudo nixbook-enroll"
         exit 1
         ;;
     esac
   '';
 in
 {
-  environment.systemPackages = [ secureBootTool ];
+  environment.systemPackages = [
+    secureBootTool
+    enroll
+  ];
 
   # Latest LTS kernel (6.18), pinned explicitly so a release bump never switches it
   boot.kernelPackages = pkgs.linuxPackages_6_18;

@@ -140,7 +140,7 @@ pkgs.testers.runNixOSTest {
         laptop.wait_for_unit("display-manager.service")
         for b in ["firefox", "ghostty", "nautilus", "bazaar", "flatpak", "claude", "codex",
                   "grok", "nordvpn", "nordvpn-gui", "distrobox", "podman", "virsh", "nixbook-update",
-                  "gnome-disks", "gnome-system-monitor",
+                  "gnome-disks", "gnome-system-monitor", "nixbook-secureboot", "nixbook-enroll",
                   "nixbook-backup-recovery", "nixbook-backup-home"]:
             laptop.succeed(f"command -v {b}")
         laptop.fail("command -v gnome-software")
