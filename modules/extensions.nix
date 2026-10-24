@@ -1,7 +1,9 @@
 # GNOME Shell extensions that were installed by hand from the extensions app.
 # Dash to Dock, Blur my Shell and AppIndicator come from nixpkgs-unstable.
-# Gradia Capture is not in nixpkgs. Its source is the gradia-capture flake
-# input, so a flake update follows the newest commit on master.
+# Gradia Capture is not in nixpkgs. This package is the offline copy, built
+# from the gradia-capture flake input (also what the ISO ships). On a boot
+# that can reach Flathub, flatpak.nix clones the git repo and installs that
+# zip into the user session, which then overrides this copy.
 {
   pkgs,
   pkgs-unstable,
