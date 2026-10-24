@@ -2,8 +2,9 @@
 { pkgs, lib, ... }:
 
 let
-  # Same steps as a hand install: clone the repo, pack with build.sh, install
-  # the zip. build.sh starts with #!/bin/bash, and NixOS has no /bin/bash, so
+  # Same steps as a hand install: clone into ~/Downloads/gradia-capture, pack
+  # with build.sh, install the zip. That checkout stays. build.sh starts with
+  # #!/bin/bash, and NixOS has no /bin/bash, so
   # it only builds when invoked as `bash build.sh`. gnome-extensions install
   # always writes into the calling user's home, which then overrides the
   # system copy from extensions.nix. That system copy is what an offline
@@ -38,26 +39,36 @@ let
     uuid=gradia-integration@alexandervanhee.github.io
     installed="$HOME/.local/share/gnome-shell/extensions/$uuid"
     stamp="$HOME/.local/state/nixbook/gradia-capture-rev"
-    work=$(mktemp -d)
-    trap 'rm -rf "$work"' EXIT
+    # The hand install lives here and stays on disk. A fresh install clones
+    # into this directory; later runs update it in place.
+    src="$HOME/Downloads/gradia-capture"
+    mkdir -p "$HOME/Downloads"
 
-    if ! git clone --depth 1 https://github.com/AlexanderVanhee/gradia-capture "$work/src"; then
-      if [ -d "$installed" ]; then
-        echo "GitHub is onbereikbaar. De geïnstalleerde Gradia Capture blijft staan."
-        exit 0
+    if [ ! -d "$src/.git" ]; then
+      if [ -e "$src" ]; then
+        echo "$src bestaat al, maar is geen git-checkout." >&2
+        exit 1
       fi
-      echo "Gradia Capture kon niet van GitHub worden gehaald." >&2
-      exit 1
+      if ! git clone https://github.com/AlexanderVanhee/gradia-capture "$src"; then
+        if [ -d "$installed" ]; then
+          echo "GitHub is onbereikbaar. De geïnstalleerde Gradia Capture blijft staan."
+          exit 0
+        fi
+        echo "Gradia Capture kon niet van GitHub worden gehaald." >&2
+        exit 1
+      fi
+    elif ! git -C "$src" pull --ff-only; then
+      echo "GitHub is onbereikbaar. De kopie in $src blijft staan."
     fi
 
-    rev=$(git -C "$work/src" rev-parse HEAD)
+    rev=$(git -C "$src" rev-parse HEAD)
     if [ -f "$stamp" ] && [ -d "$installed" ] && [ "$(cat "$stamp")" = "$rev" ]; then
-      echo "Gradia Capture $rev staat er al."
+      echo "Gradia Capture $rev staat er al ($src)."
       exit 0
     fi
 
-    ( cd "$work/src" && bash build.sh )
-    zip="$work/src/$uuid.shell-extension.zip"
+    ( cd "$src" && bash build.sh )
+    zip="$src/$uuid.shell-extension.zip"
     [ -f "$zip" ]
     gnome-extensions install --force "$zip"
     mkdir -p "$(dirname "$stamp")"
