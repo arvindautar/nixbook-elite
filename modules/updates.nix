@@ -153,16 +153,32 @@ let
     esac
   '';
 
+  # Adwaita 50 has no system-software-update icon, so the app grid showed a
+  # blank tile. These are the reboot and power symbols on their own tiles.
   desktopItem =
-    name: desktopName: action:
-    pkgs.makeDesktopItem {
-      inherit name desktopName;
-      exec = "ghostty -e nixbook-update ${action}";
-      icon = "system-software-update";
-      categories = [
-        "System"
-        "Utility"
+    name: desktopName: action: iconFile:
+    pkgs.symlinkJoin {
+      name = "${name}-desktop";
+      paths = [
+        (pkgs.makeDesktopItem {
+          inherit name desktopName;
+          exec = "ghostty -e nixbook-update ${action}";
+          icon = name;
+          categories = [
+            "System"
+            "Utility"
+          ];
+          keywords = [
+            "update"
+            "bijwerken"
+            "nixbook"
+          ];
+        })
       ];
+      postBuild = ''
+        mkdir -p $out/share/icons/hicolor/scalable/apps
+        cp ${iconFile} $out/share/icons/hicolor/scalable/apps/${name}.svg
+      '';
     };
 in
 {
@@ -244,7 +260,11 @@ in
 
   environment.systemPackages = [
     updateNow
-    (desktopItem "nixbook-update-reboot" "Bijwerken en herstarten" "reboot")
-    (desktopItem "nixbook-update-poweroff" "Bijwerken en afsluiten" "poweroff")
+    (desktopItem "nixbook-update-reboot" "Bijwerken en herstarten" "reboot"
+      ./icons/nixbook-update-reboot.svg
+    )
+    (desktopItem "nixbook-update-poweroff" "Bijwerken en afsluiten" "poweroff"
+      ./icons/nixbook-update-poweroff.svg
+    )
   ];
 }
