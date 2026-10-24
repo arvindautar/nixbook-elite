@@ -56,7 +56,12 @@ pkgs.testers.runNixOSTest {
           "-device nvme,serial=nixbook0,drive=nvm"
         ];
       };
-      environment.systemPackages = [ installScript ];
+      # cryptsetup is how the test reads the LUKS header back. Disko brings its
+      # own copy for the install, which is not on PATH afterwards.
+      environment.systemPackages = [
+        installScript
+        pkgs.cryptsetup
+      ];
       nix.settings.substituters = lib.mkForce [ ];
     };
 
