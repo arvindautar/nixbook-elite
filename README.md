@@ -93,6 +93,9 @@ with Nix (flakes enabled) to build the ISO.
    - To enroll your own keys automatically, choose *Secure Boot
      Configuration → Clear Secure Boot keys* (this puts the firmware in Setup
      Mode). You can also do this after the installation.
+   - **Reinstalling over an earlier nixbook?** Clear the keys anyway. A fresh
+     install generates new keys, and the firmware still holds the old ones.
+     Without clearing, the new system will not boot once Secure Boot is back on.
 
 3. **Install.** Boot from the stick (F9) and run:
    ```sh
@@ -225,7 +228,8 @@ volledige NixOS met terminal, containers en virtuele machines.
   schijfversleuteling. Internet is niet nodig.
 - **Secure Boot:** de laptop maakt zelf eigen sleutels aan en schrijft ze in.
   Zet Secure Boot pas aan als `nixbook-secureboot` zegt dat je eigen sleutels in
-  de firmware staan.
+  de firmware staan. Bij een herinstallatie: wis eerst de oude sleutels in het
+  BIOS (*Clear Secure Boot keys*), want de nieuwe installatie maakt nieuwe aan.
 - **Updates:** gaan vanzelf op de achtergrond (aan de lader, met internet) en
   zijn actief na een herstart. Mislukt een update, dan krijg je een melding en
   blijft alles zoals het was. Direct bijwerken: de tegels *Bijwerken en
