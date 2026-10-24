@@ -13,23 +13,41 @@ let
   rev =
     (builtins.fromJSON (builtins.readFile "${inputs.self}/flake.lock")).nodes.gradia-capture.locked.rev;
 
+  # Upstream build.sh packs a .shell-extension.zip. The -i flag installs that
+  # zip into the user's home, which a Nix system package must not do.
   gradia-capture = pkgs.stdenv.mkDerivation {
     pname = "gnome-shell-extension-gradia-capture";
     version = builtins.substring 0 7 rev;
 
     src = inputs.gradia-capture;
 
-    nativeBuildInputs = [ pkgs.glib ];
+    nativeBuildInputs = [
+      pkgs.gnome-shell # gnome-extensions pack, called by build.sh
+      pkgs.glib # glib-compile-schemas, same step as gnome-extensions install
+      pkgs.unzip
+    ];
+
+    buildPhase = ''
+      runHook preBuild
+      bash build.sh
+      runHook postBuild
+    '';
 
     installPhase = ''
       runHook preInstall
-      dest=$out/share/gnome-shell/extensions/gradia-integration@alexandervanhee.github.io
-      mkdir -p "$dest/schemas" "$dest/icons"
-      cp src/*.js src/*.css src/metadata.json "$dest/"
-      cp LICENSE README.md "$dest/"
-      cp icons/*.svg "$dest/icons/"
-      cp schemas/*.xml "$dest/schemas/"
-      glib-compile-schemas "$dest/schemas"
+      shopt -s nullglob
+      zips=( *.shell-extension.zip )
+      [ ''${#zips[@]} -eq 1 ]
+      uuid=''${zips[0]%.shell-extension.zip}
+      dest=$out/share/gnome-shell/extensions/$uuid
+      mkdir -p "$dest"
+      unzip -q "''${zips[0]}" -d "$dest"
+      # gnome-extensions install unpacks the zip and then compiles schemas.
+      # The zip only contains the xml. That command always writes into the
+      # user home and has no directory flag, so the unpack happens here.
+      [ -d "$dest/schemas" ]
+      glib-compile-schemas --strict "$dest/schemas"
+      [ -f "$dest/schemas/gschemas.compiled" ]
       runHook postInstall
     '';
 
