@@ -16,6 +16,14 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     nix-flatpak.url = "github:gmodena/nix-flatpak/latest";
+
+    # Not a flake and not in nixpkgs. `nix flake update` moves this to the
+    # newest commit; the weekly job does that. Run it before building the ISO.
+    # The ISO is offline, so it ships the commit locked at build time.
+    gradia-capture = {
+      url = "github:AlexanderVanhee/gradia-capture";
+      flake = false;
+    };
   };
 
   outputs =

@@ -1,24 +1,23 @@
 # GNOME Shell extensions that were installed by hand from the extensions app.
-# They come from nixpkgs-unstable so the weekly flake update picks up fixes.
-# Today that is dash-to-dock 109 (Shell 45-51) and blur-my-shell 72 (Shell 46-50).
-# Gradia Capture is not in nixpkgs. This is the commit already built in ~/Downloads.
+# Dash to Dock, Blur my Shell and AppIndicator come from nixpkgs-unstable.
+# Gradia Capture is not in nixpkgs. Its source is the gradia-capture flake
+# input, so a flake update follows the newest commit on master.
 {
   pkgs,
   pkgs-unstable,
+  inputs,
   ...
 }:
 
 let
+  rev =
+    (builtins.fromJSON (builtins.readFile "${inputs.self}/flake.lock")).nodes.gradia-capture.locked.rev;
+
   gradia-capture = pkgs.stdenv.mkDerivation {
     pname = "gnome-shell-extension-gradia-capture";
-    version = "0b7e47e";
+    version = builtins.substring 0 7 rev;
 
-    src = pkgs.fetchFromGitHub {
-      owner = "AlexanderVanhee";
-      repo = "gradia-capture";
-      rev = "0b7e47e1e5c1e68e234e4d2d24b307e1da1d18a9";
-      hash = "sha256-ZpJTf6gfepiC0kXUWfjB73iWLRuiQtRBq4kFzk0N6Ss=";
-    };
+    src = inputs.gradia-capture;
 
     nativeBuildInputs = [ pkgs.glib ];
 
