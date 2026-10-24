@@ -205,6 +205,12 @@ Secure Boot hints are EliteBook-specific; the rest is generic NixOS.
 - The USB stick does not boot while Secure Boot is on. To reinstall, turn
   Secure Boot off first.
 
+## License
+
+[MIT](LICENSE). The update, garbage-collection and silent-boot parts are
+adapted from [nixbook](https://github.com/mkellyxp/nixbook) by Michael Kelly,
+also MIT.
+
 ---
 
 ## Nederlands
