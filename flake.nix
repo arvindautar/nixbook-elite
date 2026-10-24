@@ -4,7 +4,7 @@
   inputs = {
     # Stable base (NixOS 26.05) with the 6.18 LTS kernel
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
-    # Only used for fast moving tools: AI CLIs, Bazaar and NordVPN
+    # Only used for fast moving tools: AI CLIs, Bazaar, NordVPN and GNOME extensions
     nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     lanzaboote = {
@@ -16,14 +16,6 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     nix-flatpak.url = "github:gmodena/nix-flatpak/latest";
-
-    # Not a flake and not in nixpkgs. `nix flake update` moves this to the
-    # newest commit; the weekly job does that. Run it before building the ISO.
-    # The ISO is offline, so it ships the commit locked at build time.
-    gradia-capture = {
-      url = "github:AlexanderVanhee/gradia-capture";
-      flake = false;
-    };
   };
 
   outputs =

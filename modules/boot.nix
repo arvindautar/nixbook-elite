@@ -140,10 +140,9 @@ in
   boot.plymouth.enable = true;
   boot.consoleLogLevel = lib.mkDefault 0;
   boot.initrd.verbose = false;
+  # Plymouth adds "splash" and consoleLogLevel adds "loglevel=0"
   boot.kernelParams = [
     "quiet"
-    "splash"
-    "loglevel=3"
     "rd.systemd.show_status=false"
     "rd.udev.log_level=3"
     "udev.log_level=3"

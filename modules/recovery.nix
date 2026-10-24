@@ -20,11 +20,16 @@ let
     mkdir -p ${store} "$dest"
     chmod 700 ${store} "$dest"
     rm -rf ${store}/sbctl "$dest/sbctl"
+    # A USB stick is usually FAT: it has no owners, and cp -a as root fails
+    # there, so copies to $dest keep only mode and time.
+    copy() { cp -r --preserve=mode,timestamps "$@"; }
     cp -a /var/lib/sbctl ${store}/sbctl
-    cp -a /var/lib/sbctl "$dest/sbctl"
+    copy /var/lib/sbctl "$dest/sbctl"
+    # luksHeaderBackup refuses to overwrite, and this is meant to be run again
+    rm -f ${store}/luks-header.bin
     ${pkgs.cryptsetup}/bin/cryptsetup luksHeaderBackup ${disk} \
       --header-backup-file ${store}/luks-header.bin
-    cp -a ${store}/luks-header.bin "$dest/luks-header.bin"
+    copy ${store}/luks-header.bin "$dest/luks-header.bin"
     chmod -R go-rwx ${store} "$dest"
     cat > ${store}/README.txt <<'EOF'
     nixbook-recovery
@@ -39,7 +44,7 @@ let
     De USB-installatiestick start niet terwijl Secure Boot aanstaat.
     Voor een herinstallatie: F10, Secure Boot uit, van de stick starten.
     EOF
-    cp -a ${store}/README.txt "$dest/README.txt"
+    copy ${store}/README.txt "$dest/README.txt"
     chmod 600 ${store}/README.txt "$dest/README.txt"
     echo "Klaar: ${store} en $dest"
     echo "Haal de andere schijf uit de laptop en leg hem apart."

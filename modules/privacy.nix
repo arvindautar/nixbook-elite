@@ -18,7 +18,8 @@
         "ipv6.ip6-privacy" = 2;
         "ipv6.addr-gen-mode" = "stable-privacy";
         "connection.llmnr" = 0;
-        "connection.mdns" = 1; # resolve only, printers via avahi
+        # mDNS is avahi's job (printers); resolved has it off, see below
+        "connection.mdns" = 0;
       };
       # No phoning home to a connectivity-check server
       connectivity.enabled = false;

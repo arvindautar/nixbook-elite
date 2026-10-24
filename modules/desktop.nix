@@ -1,4 +1,4 @@
-# Full GNOME desktop, no bundled apps: Ghostty, Firefox, Bazaar and Nautilus only.
+# Full GNOME desktop, no bundled apps: Ghostty, Firefox, Bazaar, Nautilus and VS Code only.
 # Everything else comes from Flathub via Bazaar.
 {
   pkgs,

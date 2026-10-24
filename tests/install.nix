@@ -25,7 +25,7 @@ let
           boot.plymouth.enable = lib.mkForce false;
           # This VM has no network. Don't retry Flathub for the whole test.
           systemd.services.flatpak-managed-install.serviceConfig.Restart = lib.mkForce "no";
-          systemd.services.nixbook-gradia-capture.serviceConfig.Restart = lib.mkForce "no";
+          systemd.user.services.nixbook-gradia-capture.serviceConfig.Restart = lib.mkForce "no";
         }
       )
     ];
@@ -70,7 +70,7 @@ pkgs.testers.runNixOSTest {
     };
 
   testScript = ''
-    import os, select, shutil, subprocess
+    import os, re, select, shutil, subprocess
 
     disk = os.path.join(installer.state_dir, "nvme.qcow2")
     subprocess.run(["${pkgs.qemu_kvm}/bin/qemu-img", "create", "-f", "qcow2", disk, "24G"], check=True)
@@ -78,6 +78,15 @@ pkgs.testers.runNixOSTest {
     with subtest("install"):
         installer.start()
         installer.wait_for_unit("multi-user.target")
+        # Refused before anything is wiped: names the system already uses, and
+        # a full name that useradd would only reject after the install.
+        for env in ["NB_USER=gdm NB_FULLNAME=x", "NB_USER=nordvpn NB_FULLNAME=x",
+                    "NB_USER=bob NB_FULLNAME='Bob: Test'"]:
+            out = installer.fail(
+                f"{env} NB_PASSWORD=foobar123 NB_LUKS='${luks}' NB_CONFIRM=yes nixbook-install 2>&1"
+            )
+            assert "Ongeldige" in out, out
+        installer.fail("test -e /dev/nvme0n1p1")
         print(installer.succeed(
             "NB_USER=alice NB_FULLNAME='Alice Test' NB_PASSWORD=foobar123 "
             "NB_LUKS='${luks}' NB_CONFIRM=yes nixbook-install 2>&1"
@@ -153,9 +162,24 @@ pkgs.testers.runNixOSTest {
     with subtest("user from the installer"):
         out = laptop.succeed("id alice")
         print(out)
+        laptop.succeed("test $(id -u alice) = 1000")
+        laptop.fail("id gebruiker")
+        laptop.succeed("test $(stat -c %a /home/alice) = 700")
         for g in ["wheel", "networkmanager", "libvirtd", "nordvpn"]:
             assert g in out, f"alice not in {g}"
         laptop.succeed("passwd -S root | grep -qE ' (L|NP|LK) '")
+
+    with subtest("a generation that would delete the installed user is refused"):
+        # The installed generation was built before alice existed and never
+        # declared her, so it passes.
+        laptop.succeed("/run/current-system/bin/switch-to-configuration check")
+        # Once a generation has declared her, NixOS deletes her from any later
+        # generation without her. The pre-switch check must stop that.
+        laptop.succeed("cp /var/lib/nixos/declarative-users /tmp/decl")
+        laptop.succeed("printf ' alice' >> /var/lib/nixos/declarative-users")
+        out = laptop.fail("/run/current-system/bin/switch-to-configuration check 2>&1")
+        assert "alice" in out, out
+        laptop.succeed("cp /tmp/decl /var/lib/nixos/declarative-users")
 
     with subtest("security"):
         laptop.succeed("cat /sys/kernel/security/lsm | grep -q apparmor")
@@ -175,27 +199,45 @@ pkgs.testers.runNixOSTest {
         laptop.fail("command -v gnome-text-editor")
         laptop.succeed("systemctl is-active nordvpnd.socket")
 
-    with subtest("gradia-capture is installed from git after flatpaks"):
+    with subtest("gradia-capture installs in the graphical user's home"):
         # The VM has no internet, so the clone itself is not run here. The
         # installed system must still carry the exact steps: clone the repo,
         # bash build.sh (NixOS has no /bin/bash), then install the zip.
         laptop.succeed(
-            "systemctl cat flatpak-managed-install.service | "
-            "grep -q 'OnSuccess=nixbook-gradia-capture.service'"
+            "test -L /etc/systemd/user/graphical-session.target.wants/nixbook-gradia-capture.service"
         )
+        script = laptop.succeed(
+            "sed -n 's/^ExecStart=//p' /etc/systemd/user/nixbook-gradia-capture.service"
+        ).strip()
+        assert script, "no ExecStart"
         laptop.succeed(
-            "script=$(systemctl show -P ExecStart nixbook-gradia-capture.service "
-            "| sed -n 's/.*path=\\([^ ;]*\\).*/\\1/p'); "
-            "test -n \"$script\"; "
-            "grep -q 'git clone https://github.com/AlexanderVanhee/gradia-capture' \"$script\"; "
-            "grep -q 'Downloads/gradia-capture' \"$script\"; "
-            "grep -q 'bash build.sh' \"$script\"; "
-            "grep -q 'gnome-extensions install --force' \"$script\""
+            f"grep -q 'flatpak info --system be.alexandervanhee.gradia' {script}; "
+            f"grep -q 'git clone https://github.com/AlexanderVanhee/gradia-capture' {script}; "
+            f"grep -q 'Downloads/gradia-capture' {script}; "
+            f"grep -q 'bash build.sh' {script}; "
+            f"grep -q 'gnome-extensions install --force' {script}"
         )
-        laptop.succeed("systemctl show -P User nixbook-gradia-capture.service | grep -qx gebruiker")
+        laptop.fail("grep -E '^(User|Group)=' /etc/systemd/user/nixbook-gradia-capture.service")
+        # The GDM greeter session (uid above 29999) is skipped without retries.
+        laptop.succeed(f"runuser -u nobody -- env HOME=/tmp/greeter {script}")
+        laptop.fail("test -e /tmp/greeter/Downloads")
+        # A real user waits for the Gradia Flatpak, which this offline VM lacks.
+        laptop.fail(f"runuser -u alice -- env HOME=/home/alice {script}")
+        laptop.fail("test -e /home/alice/Downloads/gradia-capture")
+        laptop.fail("test -e /etc/systemd/system/nixbook-gradia-capture.service")
+        laptop.fail("test -e /run/current-system/sw/share/gnome-shell/extensions/gradia-integration@alexandervanhee.github.io")
 
-    with subtest("first update is reproducible from /etc/nixos (eval only, offline)"):
-        laptop.succeed("test -f /etc/nixos/flake.lock")
+    with subtest("the flake and the installer's user.json are in /etc/nixos"):
+        laptop.succeed("test -f /etc/nixos/flake.nix -a -f /etc/nixos/flake.lock")
+        laptop.succeed("grep -q '\"name\": \"alice\"' /etc/nixos/hosts/elitebook/user.json")
+        laptop.succeed("grep -q '\"fullName\": \"Alice Test\"' /etc/nixos/hosts/elitebook/user.json")
+
+    with subtest("random Windows-style hostname from the installer"):
+        host = laptop.succeed("hostname").strip()
+        print(host)
+        assert re.fullmatch(r"DESKTOP-[A-HJ-NP-Z0-9]{7}", host), host
+        laptop.succeed(f"test \"$(cat /etc/hostname)\" = {host}")
+        laptop.succeed(f"grep -q '\"hostName\": \"{host}\"' /etc/nixos/hosts/elitebook/user.json")
 
     with subtest("report"):
         print(laptop.succeed("systemctl --failed --no-legend || true"))

@@ -1,5 +1,5 @@
 # Automatic partitioning: GPT -> 1 GiB ESP + LUKS2 (argon2id) -> btrfs subvolumes.
-# The installer passes the real target disk; nvme0n1 is the EliteBook's SSD.
+# nvme0n1 is the EliteBook's SSD; the installer formats exactly that disk.
 { lib, ... }:
 
 let

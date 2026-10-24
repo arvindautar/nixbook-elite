@@ -4,11 +4,9 @@
 let
   # Same steps as a hand install: clone into ~/Downloads/gradia-capture, pack
   # with build.sh, install the zip. That checkout stays. build.sh starts with
-  # #!/bin/bash, and NixOS has no /bin/bash, so
-  # it only builds when invoked as `bash build.sh`. gnome-extensions install
-  # always writes into the calling user's home, which then overrides the
-  # system copy from extensions.nix. That system copy is what an offline
-  # install and the ISO already have.
+  # #!/bin/bash, and NixOS has no /bin/bash, so it only builds when invoked as
+  # `bash build.sh`. gnome-extensions install writes only into the logged-in
+  # user's home. There is no system copy.
   gradiaCaptureFromGit = pkgs.writeShellScript "nixbook-gradia-capture" ''
     set -euo pipefail
     export PATH=${
@@ -21,8 +19,7 @@ let
         pkgs.coreutils
       ]
     }
-    # A system service has no GNOME session. gnome-extensions install needs these
-    # typelibs or it cannot unpack the zip.
+    # gnome-extensions install needs these typelibs to unpack the zip.
     export GI_TYPELIB_PATH=${
       lib.makeSearchPath "lib/girepository-1.0" [
         pkgs.glib.out
@@ -31,10 +28,15 @@ let
       ]
     }
 
-    if [ "''${HOME:-}" = "" ] || [ "$HOME" = /root ]; then
-      echo "Gradia Capture hoort in de home van gebruiker." >&2
-      exit 1
+    # The GDM greeter (gdm-greeter*, uids above 60000) also starts a graphical
+    # session. Only normal accounts (uid 1000-29999) get the extension.
+    uid=$(id -u)
+    if [ "$uid" -lt 1000 ] || [ "$uid" -gt 29999 ] || [ -z "''${HOME:-}" ]; then
+      exit 0
     fi
+    # Fails until flatpak-managed-install has put Gradia on the system; the
+    # unit then retries.
+    ${pkgs.flatpak}/bin/flatpak info --system be.alexandervanhee.gradia >/dev/null
 
     uuid=gradia-integration@alexandervanhee.github.io
     installed="$HOME/.local/share/gnome-shell/extensions/$uuid"
@@ -119,26 +121,24 @@ in
       IOWeight = 20;
     };
     unitConfig.StartLimitIntervalSec = 0;
-    # Gradia the Flatpak is in the list above. Its shell extension is not a
-    # Flatpak; pull the current git revision once this install succeeds.
-    onSuccess = [ "nixbook-gradia-capture.service" ];
   };
 
-  # Not wanted by boot. It starts only after flatpak-managed-install succeeds,
-  # which is the first boot that can reach Flathub, and again on later boots
-  # once that install has run. Offline, the system extension stays in use.
-  systemd.services.nixbook-gradia-capture = {
+  # Run in each graphical session using that user's HOME, retrying until the
+  # system-wide Gradia Flatpak and GitHub are available. Existing copies work
+  # offline. Every few minutes is enough: Flathub installs take longer.
+  systemd.user.services.nixbook-gradia-capture = {
     description = "Install Gradia Capture from git";
+    wantedBy = [ "graphical-session.target" ];
+    after = [ "graphical-session.target" ];
+    partOf = [ "graphical-session.target" ];
     serviceConfig = {
       Type = "oneshot";
-      User = "gebruiker";
-      Group = "users";
       ExecStart = gradiaCaptureFromGit;
       CPUWeight = 20;
       IOWeight = 20;
       Nice = 19;
       Restart = "on-failure";
-      RestartSec = "60s";
+      RestartSec = "5min";
     };
     unitConfig.StartLimitIntervalSec = 0;
   };

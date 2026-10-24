@@ -38,7 +38,8 @@ let
   #  --if-due (timer): skip when the last successful update is less than 6 days old,
   #  and when offline (tried again the next day instead of failing).
   upgrade = pkgs.writeShellScript "nixbook-upgrade" ''
-    set -eu
+    # -E: the ERR trap below must also fire for failures inside functions
+    set -Eeu
     export PATH=${
       lib.makeBinPath [
         pkgs.nix
