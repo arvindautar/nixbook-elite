@@ -41,6 +41,7 @@ let
 in
 pkgs.testers.runNixOSTest {
   name = "nixbook-install";
+  globalTimeout = 2 * 60 * 60;
 
   nodes.installer =
     { ... }:
@@ -96,9 +97,11 @@ pkgs.testers.runNixOSTest {
         laptop.send_console("${luks}\n")
 
     with subtest("boot 1: unlock, keys generated + prepared, automatic reboot"):
-        laptop.start()
+        # allow_reboot keeps QEMU alive across the lanzaboote reboot. The
+        # kernel prints "Restarting system" (no "reboot:" prefix).
+        laptop.start(allow_reboot=True)
         unlock()
-        laptop.wait_for_console_text("reboot: Restarting system")
+        laptop.wait_for_console_text("Restarting system")
 
     with subtest("boot 2: systemd-boot enrolls the keys and resets; boot 3: Secure Boot on"):
         unlock()
