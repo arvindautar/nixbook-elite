@@ -95,6 +95,10 @@ in
       "com.github.PintaProject.Pinta" # paint
       "be.alexandervanhee.gradia" # screenshot annotation, with Gradia Capture
       "org.gnome.Papers" # PDF
+      "org.gnome.Loupe" # images
+      "org.gnome.Calculator"
+      "io.gitlab.librewolf-community" # browser
+      "it.mijorus.smile" # emoji picker
       "com.mattjakeman.ExtensionManager" # browse/install GNOME extensions
     ];
     # Never remove apps that were installed through Bazaar

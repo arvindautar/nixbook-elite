@@ -83,8 +83,8 @@ pkgs.testers.runNixOSTest {
     shutil.copy("${ovmf}/FV/OVMF_VARS.fd", vars)
     os.chmod(vars, 0o644)
     start_cmd = (
-        "${pkgs.qemu_kvm}/bin/qemu-kvm -cpu max -m 4096 -smp 4 "
-        "-laptop q35,smm=on -global driver=cfi.pflash01,property=secure,value=on "
+        "${pkgs.qemu_kvm}/bin/qemu-kvm -cpu max -m 4096 -smp 4 -enable-kvm "
+        "-machine type=q35,smm=on -global driver=cfi.pflash01,property=secure,value=on "
         "-drive if=pflash,format=raw,unit=0,readonly=on,file=${ovmf}/FV/OVMF_CODE.fd "
         f"-drive if=pflash,format=raw,unit=1,file={vars} "
         f"-drive file={disk},if=none,id=nvm,format=qcow2 -device nvme,serial=nixbook0,drive=nvm "
@@ -146,6 +146,25 @@ pkgs.testers.runNixOSTest {
         laptop.fail("command -v gnome-software")
         laptop.fail("command -v gnome-text-editor")
         laptop.succeed("systemctl is-active nordvpnd.socket")
+
+    with subtest("gradia-capture is installed from git after flatpaks"):
+        # The VM has no internet, so the clone itself is not run here. The
+        # installed system must still carry the exact steps: clone the repo,
+        # bash build.sh (NixOS has no /bin/bash), then install the zip.
+        laptop.succeed(
+            "systemctl cat flatpak-managed-install.service | "
+            "grep -q 'OnSuccess=nixbook-gradia-capture.service'"
+        )
+        laptop.succeed(
+            "script=$(systemctl show -P ExecStart nixbook-gradia-capture.service "
+            "| sed -n 's/.*path=\\([^ ;]*\\).*/\\1/p'); "
+            "test -n \"$script\"; "
+            "grep -q 'git clone https://github.com/AlexanderVanhee/gradia-capture' \"$script\"; "
+            "grep -q 'Downloads/gradia-capture' \"$script\"; "
+            "grep -q 'bash build.sh' \"$script\"; "
+            "grep -q 'gnome-extensions install --force' \"$script\""
+        )
+        laptop.succeed("systemctl show -P User nixbook-gradia-capture.service | grep -qx gebruiker")
 
     with subtest("first update is reproducible from /etc/nixos (eval only, offline)"):
         laptop.succeed("test -f /etc/nixos/flake.lock")
