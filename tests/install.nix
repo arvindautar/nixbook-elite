@@ -15,9 +15,11 @@ let
   target = nixbook.extendModules {
     modules = [
       (
-        { modulesPath, ... }:
+        { modulesPath, pkgs, ... }:
         {
           imports = [ "${modulesPath}/testing/test-instrumentation.nix" ];
+          # lsattr checks the No_COW flag on the libvirt subvolume.
+          environment.systemPackages = [ pkgs.e2fsprogs ];
           boot.initrd.availableKernelModules = [ "virtio_console" ];
           # The LUKS prompt goes to the serial console so the test can answer it.
           boot.plymouth.enable = lib.mkForce false;
@@ -139,6 +141,7 @@ pkgs.testers.runNixOSTest {
         laptop.succeed("findmnt -no OPTIONS / | grep -q compress=zstd:1")
         for mp in ["/home", "/nix", "/var/log", "/var/lib/libvirt/images"]:
             laptop.succeed(f"findmnt {mp}")
+        print(laptop.succeed("lsattr -d /var/lib/libvirt/images"))
         laptop.succeed("lsattr -d /var/lib/libvirt/images | grep -q C")
 
     with subtest("kernel, memory"):
