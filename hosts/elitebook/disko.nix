@@ -56,13 +56,7 @@ in
               allowDiscards = true;
               # Skip dm-crypt workqueues: lower latency on NVMe (as used by Cloudflare/Fedora)
               bypassWorkqueues = true;
-              # TPM2+PIN is enrolled at runtime (nixbook-enroll). Until then, and
-              # whenever the TPM refuses, systemd asks for the passphrase.
-              # PCR 7 is the Secure Boot state, so weekly updates keep unlocking.
-              crypttabExtraOpts = [
-                "tpm2-device=auto"
-                "tpm2-pin=true"
-              ];
+              # Unlock stays the long passphrase. No TPM and no PIN.
             };
             content = {
               type = "btrfs";

@@ -104,7 +104,7 @@
   # Thunderbolt devices must be authorised (GNOME asks)
   services.hardware.bolt.enable = true;
 
-  # TPM2 available for optional TPM+PIN unlock later (see README)
+  # The TPM stays available to the firmware. Disk unlock is the passphrase.
   security.tpm2.enable = true;
 
   # No core dumps (they can contain passwords/keys)
