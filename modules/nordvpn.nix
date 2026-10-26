@@ -15,4 +15,9 @@
     enable = true;
     package = pkgs-unstable.nordvpn;
   };
+
+  # The module starts the daemon from graphical.target without requiring its
+  # socket. On a rebuild the daemon could then come back first, and systemd
+  # refuses to start the socket ("Socket service already active"), failing the switch.
+  systemd.services.nordvpnd.requires = [ "nordvpnd.socket" ];
 }

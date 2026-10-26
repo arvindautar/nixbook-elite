@@ -190,7 +190,7 @@ pkgs.testers.runNixOSTest {
 
     with subtest("desktop and apps"):
         laptop.wait_for_unit("display-manager.service")
-        for b in ["firefox", "ghostty", "nautilus", "bazaar", "flatpak", "claude", "codex",
+        for b in ["ghostty", "nautilus", "bazaar", "flatpak", "claude", "codex",
                   "grok", "nordvpn", "nordvpn-gui", "distrobox", "podman", "virsh", "nixbook-update",
                   "gnome-disks", "gnome-system-monitor", "nixbook-secureboot", "nixbook-enroll",
                   "nixbook-backup-recovery", "nixbook-backup-home"]:
@@ -198,6 +198,10 @@ pkgs.testers.runNixOSTest {
         laptop.fail("command -v gnome-software")
         laptop.fail("command -v gnome-text-editor")
         laptop.succeed("systemctl is-active nordvpnd.socket")
+        # Browser policies must be real files: Flatpak sandboxes can't see /nix/store
+        for p in ["/etc/brave/policies/managed/nixbook.json",
+                  "/var/lib/flatpak/extension/org.mozilla.firefox.systemconfig/x86_64/stable/policies/policies.json"]:
+            laptop.succeed(f"test -f {p} && ! test -L {p} && grep -q : {p}")
 
     with subtest("gradia-capture installs in the graphical user's home"):
         # The VM has no internet, so the clone itself is not run here. The

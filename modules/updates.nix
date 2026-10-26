@@ -2,7 +2,7 @@
 #  - a few times a day, but only when the last success is 6+ days old and the
 #    laptop is on AC: update flake inputs in /etc/nixos, commit the lock, build
 #    the new system in the background. It becomes active on the next reboot.
-#  - daily: Flatpak updates (flatpak.nix)
+#  - every 4 hours: Flatpak updates, with a restart prompt for updated apps that are open
 #  - garbage collection scaled to free disk space (nixbook channel.sh)
 { pkgs, lib, ... }:
 
@@ -139,6 +139,31 @@ let
     ${pkgs.flatpak}/bin/flatpak uninstall ${scope} --unused -y --noninteractive
   '';
 
+  # A running app keeps using the old version until it is restarted. After an
+  # update, ask each user to restart the updated apps they have open.
+  flatpakSystemUpdate = ''
+    apps() { ${pkgs.flatpak}/bin/flatpak list --system --app --columns=application,active,name | sort; }
+    before=$(apps)
+    ${flatpakUpdate "--system"}
+    after=$(apps)
+    changed=$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | cut -f1 | sort -u)
+    [ -n "$changed" ] || exit 0
+    for uid in $(${pkgs.systemd}/bin/loginctl list-users --no-legend | ${pkgs.gawk}/bin/awk '{print $1}'); do
+      user=$(id -nu "$uid") || continue
+      [ -S "/run/user/$uid/bus" ] || continue
+      as_user() {
+        ${pkgs.util-linux}/bin/runuser -u "$user" -- env XDG_RUNTIME_DIR="/run/user/$uid" \
+          DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" "$@"
+      }
+      running=$(as_user ${pkgs.flatpak}/bin/flatpak ps --columns=application | sort -u)
+      for app in $(comm -12 <(printf '%s\n' "$changed") <(printf '%s\n' "$running")); do
+        name=$(${pkgs.gawk}/bin/awk -F'\t' -v a="$app" '$1 == a { print $3 }' <<< "$after")
+        as_user ${pkgs.libnotify}/bin/notify-send -a "Systeemupdate" "$name is bijgewerkt" \
+          "Sluit $name en open het opnieuw om de update te gebruiken." || true
+      done
+    done
+  '';
+
   # Manual "update now" for the app grid (nixbook update.sh / update_shutdown.sh)
   updateNow = pkgs.writeShellScriptBin "nixbook-update" ''
     action="''${1:-reboot}"
@@ -226,20 +251,22 @@ in
       RestartSec = "15min";
     };
     unitConfig.StartLimitIntervalSec = 0;
-    script = flatpakUpdate "--system";
+    script = flatpakSystemUpdate;
     after = [
       "network-online.target"
       "flatpak-managed-install.service"
     ];
     wants = [ "network-online.target" ];
   };
+  # Every 4 hours: browser security fixes land on Flathub within hours, and a
+  # check with nothing new only fetches the small repo summary.
   systemd.timers.nixbook-flatpak-update = {
     wantedBy = [ "timers.target" ];
     timerConfig = {
-      OnCalendar = "daily";
+      OnCalendar = "00/4:00";
       OnBootSec = "15min";
       Persistent = true;
-      RandomizedDelaySec = "1h";
+      RandomizedDelaySec = "30min";
     };
   };
 
@@ -252,10 +279,10 @@ in
   systemd.user.timers.nixbook-flatpak-update = {
     wantedBy = [ "timers.target" ];
     timerConfig = {
-      OnCalendar = "daily";
+      OnCalendar = "00/4:00";
       OnStartupSec = "20min";
       Persistent = true;
-      RandomizedDelaySec = "1h";
+      RandomizedDelaySec = "30min";
     };
   };
 

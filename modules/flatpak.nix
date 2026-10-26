@@ -91,6 +91,7 @@ in
     packages = [
       "com.github.tchx84.Flatseal"
       "com.brave.Browser"
+      "org.mozilla.firefox" # policies in desktop.nix
       "io.github.diegopvlk.Cine" # video
       "org.gnome.Decibels" # audio
       "org.onlyoffice.desktopeditors" # office (own nl/en-GB dictionaries)
@@ -102,6 +103,14 @@ in
       "io.gitlab.librewolf-community" # browser
       "it.mijorus.smile" # emoji picker
       "com.mattjakeman.ExtensionManager" # browse/install GNOME extensions
+    ];
+    # OnlyOffice opens documents from others and is online: no access to every
+    # file, only these folders. Elsewhere, open the file from Nautilus.
+    overrides.settings."org.onlyoffice.desktopeditors".Context.filesystems = [
+      "!host"
+      "xdg-documents"
+      "xdg-download"
+      "xdg-desktop"
     ];
     # Never remove apps that were installed through Bazaar
     uninstallUnmanaged = false;

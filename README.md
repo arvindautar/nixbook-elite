@@ -24,9 +24,9 @@ privacy-first default setup.
 
 ## What you get
 
-**Desktop.** GNOME without the bundled apps. Ghostty, Firefox, Nautilus,
+**Desktop.** GNOME without the bundled apps. Ghostty, Nautilus,
 VS Code (FHS variant) and Bazaar are installed; everything else comes from
-Flathub. Installed on the first boot with internet: Brave, LibreWolf,
+Flathub. Installed on the first boot with internet: Brave, Firefox, LibreWolf,
 ONLYOFFICE, Papers (PDF), Loupe (images), Cine (video), Decibels (audio),
 Pinta, Gradia (screenshots, with its Gradia Capture shell extension),
 Calculator, Smile (emoji), Extension Manager and Flatseal. Dash to Dock,
@@ -44,7 +44,9 @@ with € on AltGr+5, spell checking for Dutch and British English.
 - A different random MAC address per Wi-Fi network (stable on that network), a stable random MAC on Ethernet, and no hostname in DHCP.
 - A random Windows-style hostname per laptop (`DESKTOP-XXXXXXX`).
 - IPv6 privacy addresses; no LLMNR, no network connectivity checks, and no fallback DNS to Google or Cloudflare.
-- Telemetry off in Firefox and GNOME, location services off, and the laptop is never announced on the network.
+- Telemetry off in GNOME, location services off, and the laptop is never announced on the network.
+- Brave and Firefox get locked policies: no telemetry or usage pings, no Brave Rewards, Wallet, VPN or News, and no page preloading. Safe Browsing, Tor windows, Leo, Translate and Sync stay available.
+- ONLYOFFICE, which opens other people's documents and is online, only sees Documents, Downloads and Desktop.
 - NordVPN daemon, CLI and GUI included (`nordvpn login`).
 
 **Performance.**
@@ -59,7 +61,8 @@ with € on AltGr+5, spell checking for Dutch and British English.
 - A few times a day the system checks whether an update is due (6+ days since the last success, on mains power and online).
 - When it is, it updates the flake inputs, commits the new `flake.lock` and builds the new system in the background. That system becomes active on the next reboot.
 - A failed build reverts the lock and shows a notification.
-- Flatpaks update daily, and old generations are garbage-collected based on free disk space.
+- Flatpaks, including those installed with Bazaar, update every 4 hours. When an app you have open was updated, a notification asks you to restart it.
+- Old generations are garbage-collected based on free disk space.
 - Two app-grid tiles do it right away: *Bijwerken en herstarten* (update and reboot) and *Bijwerken en afsluiten* (update and shut down).
 
 **Backups.**
@@ -152,8 +155,8 @@ installer/
 modules/
   base.nix                 Nix, locale, the user account, printing, fonts
   boot.nix                 lanzaboote Secure Boot, kernel, silent boot
-  desktop.nix              GNOME, apps, Firefox policies, defaults
-  flatpak.nix              Flathub apps, Gradia Capture
+  desktop.nix              GNOME, apps, Brave/Firefox policies, defaults
+  flatpak.nix              Flathub apps and overrides, Gradia Capture
   security.nix, privacy.nix, performance.nix, power.nix
   updates.nix              automatic updates, garbage collection
   backup.nix, recovery.nix snapshots, restic, key/header backup
