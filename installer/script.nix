@@ -12,19 +12,15 @@ pkgs.writeShellApplication {
   runtimeInputs = with pkgs; [
     util-linux
     coreutils
-    jq
     nixos-install-tools
   ];
   text =
     lib.replaceStrings
-      [ "@toplevel@" "@disko@" "@flake@" "@reserved@" ]
+      [ "@toplevel@" "@disko@" "@flake@" ]
       [
         "${target.config.system.build.toplevel}"
         "${target.config.system.build.diskoScript}"
         "${flakeSource}"
-        (lib.concatStringsSep " " (
-          lib.attrNames target.config.users.users ++ lib.attrNames target.config.users.groups
-        ))
       ]
       (builtins.readFile ./install.sh);
 }

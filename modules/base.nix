@@ -1,9 +1,6 @@
-# Nix, locale, users and the basics (adapted from nixbook common.nix)
+# Nix, locale and the basics (adapted from nixbook common.nix)
 {
-  config,
   pkgs,
-  lib,
-  nixbookUser,
   ...
 }:
 
@@ -41,61 +38,6 @@
     variant = "euro";
   };
   console.keyMap = "us";
-
-  # The offline image has no primary account: the installer creates it.
-  # Installed user.json declares it on later rebuilds without resetting its password.
-  users.mutableUsers = true;
-  users.users = {
-    root.hashedPassword = "!"; # root login disabled, use sudo
-  }
-  // lib.optionalAttrs (nixbookUser.name != null) {
-    ${nixbookUser.name} = {
-      isNormalUser = true;
-      uid = 1000;
-      description = nixbookUser.fullName;
-      extraGroups = [
-        "wheel"
-        "networkmanager"
-        "libvirtd"
-        "nordvpn"
-        "video"
-        "audio"
-      ];
-    };
-  };
-  # A user that an earlier generation declared and this one does not is
-  # deleted on activation, also with mutableUsers. Refuse that for normal
-  # accounts, so an empty or wrong user.json cannot lock anyone out.
-  # A deliberate removal: NIXOS_NO_CHECK=1 nixos-rebuild ...
-  system.preSwitchChecks.nixbookKeepUsers =
-    let
-      normalUsers = lib.attrNames (lib.filterAttrs (_: u: u.isNormalUser) config.users.users);
-    in
-    ''
-      decl=/var/lib/nixos/declarative-users
-      [ -e "$decl" ] || exit 0
-      missing=$(${pkgs.gawk}/bin/awk -F: \
-        -v decl="$(${pkgs.coreutils}/bin/cat "$decl")" \
-        -v keep=${lib.escapeShellArg (lib.concatStringsSep " " normalUsers)} '
-        BEGIN {
-          split(decl, d, " "); for (i in d) was[d[i]] = 1
-          split(keep, k, " "); for (i in k) now[k[i]] = 1
-        }
-        $3 >= 1000 && $3 <= 29999 && ($1 in was) && !($1 in now) { print $1 }
-      ' /etc/passwd)
-      if [ -n "$missing" ]; then
-        echo "Deze configuratie zou deze gebruiker(s) verwijderen: $missing"
-        echo "Zet de naam in /etc/nixos/hosts/elitebook/user.json, bijvoorbeeld:"
-        echo "  {\"name\": \"''${missing%%[[:space:]]*}\", \"fullName\": \"...\"}"
-        exit 1
-      fi
-    '';
-
-  # Groups the installer gives the first user
-  users.groups = {
-    libvirtd = { };
-    nordvpn = { };
-  };
 
   # Printing with driverless (IPP Everywhere) printers, like nixbook
   services.printing = {

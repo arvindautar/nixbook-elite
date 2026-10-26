@@ -1,13 +1,12 @@
 # HP EliteBook 840 14 inch G10 (i5-1345U, 16 GB, KIOXIA BG5 256 GB NVMe)
-{ nixbookUser, ... }:
+{ ... }:
 
 {
-  _module.args.nixbookUser = builtins.fromJSON (builtins.readFile ./user.json);
-
   imports = [
     ./hardware.nix
     ./disko.nix
     ../../modules/base.nix
+    ../../modules/accounts.nix
     ../../modules/boot.nix
     ../../modules/desktop.nix
     ../../modules/flatpak.nix
@@ -26,16 +25,22 @@
   ];
 
   # Looks like any Windows PC: says nothing about you, the device or the OS.
-  # The installer picks a random DESKTOP-XXXXXXX per laptop, writes it to
-  # /etc/hostname for the first boot and to user.json for every rebuild after.
-  # The offline image has none, so NixOS leaves /etc/hostname to the installer.
-  networking.hostName = if nixbookUser.hostName or null == null then "" else nixbookUser.hostName;
-  assertions = [
-    {
-      assertion = nixbookUser.name == null || nixbookUser.hostName or null != null;
-      message = ''hosts/elitebook/user.json mist "hostName", bijvoorbeeld "DESKTOP-AB12CD3".'';
-    }
-  ];
+  # The installer picks a random DESKTOP-XXXXXXX per laptop and writes it to
+  # /etc/hostname. With no hostname here, NixOS leaves that file alone.
+  networking.hostName = "";
+
+  # Laptops installed when user.json held the hostname had /etc/hostname from
+  # NixOS, which removes it now. Keep the name they are running with.
+  system.activationScripts.nixbookHostname = {
+    deps = [ "etc" ];
+    text = ''
+      if [ ! -e /etc/hostname ]; then
+        case "$(cat /proc/sys/kernel/hostname)" in
+          DESKTOP-*) cat /proc/sys/kernel/hostname > /etc/hostname ;;
+        esac
+      fi
+    '';
+  };
 
   system.stateVersion = "26.05";
 }

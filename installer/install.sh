@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # nixbook-install: offline installer for the HP EliteBook 840 G10.
 # Placeholders @...@ are filled in by installer/iso.nix.
-# Non-interactive use (tests): NB_USER NB_FULLNAME NB_PASSWORD NB_LUKS NB_CONFIRM=yes
+# The account is made at first boot in GNOME's setup screen, so the only
+# question here is the disk encryption passphrase.
+# Non-interactive use (tests): NB_LUKS NB_CONFIRM=yes
 set -euo pipefail
 
 TOPLEVEL="@toplevel@"
 DISKO="@disko@"
 FLAKE_SRC="@flake@"
-# Accounts and groups the system itself declares; the new user must not reuse one
-RESERVED=" @reserved@ "
 DISK="/dev/nvme0n1"
 KEYFILE="/tmp/nixbook-luks.key"
 
@@ -18,14 +18,6 @@ die() { printf '\n\033[31mFOUT: %s\033[0m\n' "$*" >&2; exit 1; }
 [ "$(id -u)" -eq 0 ] || exec sudo -E "$0" "$@"
 [ -d /sys/firmware/efi ] || die "Niet in UEFI-modus opgestart. Zet in het BIOS 'Legacy' uit."
 [ -b "$DISK" ] || die "$DISK niet gevonden."
-
-valid_user() {
-  [[ "$1" =~ ^[a-z_][a-z0-9_-]{0,30}$ ]] && [[ "$RESERVED" != *" $1 "* ]]
-}
-# useradd and NixOS both refuse ':' and control characters in the full name
-valid_fullname() {
-  [[ "$1" != *[[:cntrl:]:]* ]]
-}
 
 ask_secret() { # prompt, var, minlen
   local a b
@@ -43,26 +35,12 @@ lsblk -d -o NAME,SIZE,MODEL "$DISK"
 echo
 echo "ALLE gegevens op $DISK worden gewist."
 
-if [ -z "${NB_USER:-}" ]; then
-  while true; do
-    read -r -p "Gebruikersnaam (kleine letters): " NB_USER
-    valid_user "$NB_USER" && break
-    echo "Ongeldige of al gebruikte naam."
-  done
-  while true; do
-    read -r -p "Volledige naam: " NB_FULLNAME
-    valid_fullname "$NB_FULLNAME" && break
-    echo "Geen dubbele punt (:) in de naam."
-  done
-  ask_secret "Wachtwoord voor $NB_USER" NB_PASSWORD 8
+if [ -z "${NB_LUKS:-}" ]; then
   echo
   echo "Schijfversleuteling: kies een lange wachtzin (bijv. 5+ woorden)."
+  echo "Die typ je bij elke start. Kwijt = alle gegevens kwijt."
   ask_secret "LUKS-wachtzin" NB_LUKS 12
 fi
-valid_user "$NB_USER" || die "Ongeldige gebruikersnaam: $NB_USER"
-valid_fullname "${NB_FULLNAME:-}" || die "Ongeldige volledige naam."
-# Non-interactive runs must bring both secrets; check before anything is wiped
-[ -n "${NB_PASSWORD:-}" ] && [ -n "${NB_LUKS:-}" ] || die "Wachtwoord of LUKS-wachtzin ontbreekt."
 if [ "${NB_CONFIRM:-}" != "yes" ]; then
   read -r -p "Typ WISSEN om $DISK te wissen en te installeren: " c
   [ "$c" = "WISSEN" ] || die "Geannuleerd."
@@ -79,26 +57,18 @@ done
 # HP Sure Start restores the factory keys after our enrollment unless this is off
 sb_protect=$(cat "/sys/class/firmware-attributes/hp-bioscfg/attributes/Sure Start Secure Boot Keys Protection/current_value" 2>/dev/null || true)
 
-bold "1/4 Partitioneren en versleutelen (LUKS2 + btrfs)"
+bold "1/3 Partitioneren en versleutelen (LUKS2 + btrfs)"
 (umask 077 && printf '%s' "$NB_LUKS" > "$KEYFILE")
 trap 'rm -f "$KEYFILE"' EXIT
 "$DISKO"
 rm -f "$KEYFILE"
 
-bold "2/4 Systeem installeren (offline)"
+bold "2/3 Systeem installeren (offline)"
 nixos-install --system "$TOPLEVEL" --no-root-passwd --no-channel-copy
 
-bold "3/4 Gebruiker aanmaken"
-# The prebuilt system has no primary account, so activation on first boot
-# cannot recreate a placeholder account alongside the chosen username.
-printf -v account_command 'useradd -m -u 1000 -c %q -G wheel,networkmanager,libvirtd,nordvpn,video,audio %q' \
-  "${NB_FULLNAME:-$NB_USER}" "$NB_USER"
-nixos-enter --root /mnt -c "$account_command"
-printf '%s:%s\n' "$NB_USER" "$NB_PASSWORD" | nixos-enter --root /mnt -c chpasswd
-
-bold "4/4 Configuratie naar /etc/nixos kopiëren"
+bold "3/3 Configuratie naar /etc/nixos kopiëren"
 # Like a fresh Windows PC: DESKTOP- and 7 random characters, new for every laptop.
-# The prebuilt system has no hostname, so this file is used from the first boot.
+# The flake sets no hostname, so NixOS keeps this file on every rebuild.
 chars=ABCDEFGHJKLMNPQRSTUVWXYZ0123456789
 host=DESKTOP-
 for b in $(od -An -N7 -tu1 /dev/urandom); do host+=${chars:$((b % ${#chars})):1}; done
@@ -106,13 +76,12 @@ printf '%s\n' "$host" > /mnt/etc/hostname
 mkdir -p /mnt/etc/nixos
 cp -rT "$FLAKE_SRC" /mnt/etc/nixos
 chmod -R u+w /mnt/etc/nixos
-jq -n --arg name "$NB_USER" --arg fullName "${NB_FULLNAME:-$NB_USER}" --arg hostName "$host" \
-  '{name: $name, fullName: $fullName, hostName: $hostName}' > /mnt/etc/nixos/hosts/elitebook/user.json
 sync
 
 bold "Klaar!"
 cat <<EOF
-Verwijder de USB-stick en herstart.
+Verwijder de USB-stick en herstart. Na het invoeren van de wachtzin maak je
+in het welkomstscherm je account aan.
 
 Secure Boot:
 EOF

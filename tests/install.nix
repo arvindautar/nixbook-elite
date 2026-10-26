@@ -78,19 +78,11 @@ pkgs.testers.runNixOSTest {
     with subtest("install"):
         installer.start()
         installer.wait_for_unit("multi-user.target")
-        # Refused before anything is wiped: names the system already uses, and
-        # a full name that useradd would only reject after the install.
-        for env in ["NB_USER=gdm NB_FULLNAME=x", "NB_USER=nordvpn NB_FULLNAME=x",
-                    "NB_USER=bob NB_FULLNAME='Bob: Test'"]:
-            out = installer.fail(
-                f"{env} NB_PASSWORD=foobar123 NB_LUKS='${luks}' NB_CONFIRM=yes nixbook-install 2>&1"
-            )
-            assert "Ongeldige" in out, out
+        # Refused before anything is wiped: a missing passphrase in a
+        # non-interactive run
+        installer.fail("NB_LUKS= NB_CONFIRM=yes nixbook-install < /dev/null")
         installer.fail("test -e /dev/nvme0n1p1")
-        print(installer.succeed(
-            "NB_USER=alice NB_FULLNAME='Alice Test' NB_PASSWORD=foobar123 "
-            "NB_LUKS='${luks}' NB_CONFIRM=yes nixbook-install 2>&1"
-        ))
+        print(installer.succeed("NB_LUKS='${luks}' NB_CONFIRM=yes nixbook-install 2>&1"))
         installer.succeed("test ! -e /tmp/nixbook-luks.key")
         installer.succeed("cryptsetup luksDump /dev/nvme0n1p2 | grep -q 'Version:.*2'")
         installer.succeed("cryptsetup luksDump /dev/nvme0n1p2 | grep -q argon2id")
@@ -159,19 +151,62 @@ pkgs.testers.runNixOSTest {
         laptop.succeed("grep -q zstd /sys/block/zram0/comp_algorithm")
         laptop.succeed("test $(sysctl -n vm.swappiness) = 180")
 
-    with subtest("user from the installer"):
+    with subtest("first boot: GNOME's setup screen makes the first account"):
+        laptop.fail("getent passwd | awk -F: '$3 >= 1000 && $3 <= 29999' | grep .")
+        laptop.wait_for_unit("display-manager.service")
+        laptop.fail("test -e /run/gdm/gdm.ran-initial-setup")
+        laptop.wait_until_succeeds("pgrep -f 'gnome-initial-setup' >&2", timeout=300)
+        # GDM mode (makes an account), not the per-user first-login mode
+        laptop.fail("pgrep -f 'gnome-initial-setup --existing-user'")
+        # Its vendor.conf skips the pages this flake fixes, not account or password
+        conf = laptop.succeed(
+            "cat $(grep -ao '/nix/store/[a-z0-9]*-vendor.conf' "
+            "${target.pkgs.gnome-initial-setup}/libexec/.gnome-initial-setup-wrapped | head -1)"
+        )
+        assert "skip=language;keyboard;timezone;software;" in conf, conf
+        # What the account page does: an administrator through accountsservice
+        laptop.succeed(
+            "busctl call org.freedesktop.Accounts /org/freedesktop/Accounts "
+            "org.freedesktop.Accounts CreateUser ssi alice 'Alice Test' 1"
+        )
+        laptop.succeed("echo alice:foobar123 | chpasswd")
+
+    with subtest("the first account gets the admin groups"):
+        laptop.wait_until_succeeds("id -nG alice | grep -qw nordvpn", timeout=60)
         out = laptop.succeed("id alice")
         print(out)
         laptop.succeed("test $(id -u alice) = 1000")
         laptop.fail("id gebruiker")
         laptop.succeed("test $(stat -c %a /home/alice) = 700")
-        for g in ["wheel", "networkmanager", "libvirtd", "nordvpn"]:
+        for g in ["wheel", "networkmanager", "libvirtd", "nordvpn", "video", "audio"]:
             assert g in out, f"alice not in {g}"
         laptop.succeed("passwd -S root | grep -qE ' (L|NP|LK) '")
 
+    with subtest("a standard account gets no admin groups"):
+        laptop.succeed(
+            "busctl call org.freedesktop.Accounts /org/freedesktop/Accounts "
+            "org.freedesktop.Accounts CreateUser ssi bob 'Bob Test' 0"
+        )
+        laptop.wait_until_succeeds("grep -qx 'bob:165536:65536' /etc/subuid", timeout=60)
+        out = laptop.succeed("id -nG bob")
+        for g in ["wheel", "libvirtd", "nordvpn"]:
+            assert g not in out.split(), f"bob in {g}: {out}"
+
+    with subtest("accounts can run rootless containers"):
+        # No generation declares alice, so NixOS itself gives her no
+        # subordinate IDs; nixbook-setup-accounts must, also after activation.
+        laptop.succeed("grep -qx 'alice:100000:65536' /etc/subuid")
+        laptop.succeed("grep -qx 'alice:100000:65536' /etc/subgid")
+        laptop.succeed("grep -q '\"alice\":100000' /var/lib/nixos/auto-subuid-map")
+        laptop.succeed("/run/current-system/activate")
+        laptop.succeed("test $(grep -c '^alice:' /etc/subuid) = 1")
+        laptop.succeed("grep -qx 'alice:100000:65536' /etc/subuid")
+        laptop.succeed("id -nG alice | grep -qw libvirtd")
+        out = laptop.succeed("runuser -u alice -- podman unshare cat /proc/self/uid_map")
+        assert "100000" in out, out
+        laptop.succeed("userdel -r bob")
     with subtest("a generation that would delete the installed user is refused"):
-        # The installed generation was built before alice existed and never
-        # declared her, so it passes.
+        # No generation has declared alice, so the check passes.
         laptop.succeed("/run/current-system/bin/switch-to-configuration check")
         # Once a generation has declared her, NixOS deletes her from any later
         # generation without her. The pre-switch check must stop that.
@@ -249,17 +284,23 @@ pkgs.testers.runNixOSTest {
         laptop.fail("test -e /etc/systemd/system/nixbook-gradia-capture.service")
         laptop.fail("test -e /run/current-system/sw/share/gnome-shell/extensions/gradia-integration@alexandervanhee.github.io")
 
-    with subtest("the flake and the installer's user.json are in /etc/nixos"):
+    with subtest("the flake is in /etc/nixos, without any account in it"):
         laptop.succeed("test -f /etc/nixos/flake.nix -a -f /etc/nixos/flake.lock")
-        laptop.succeed("grep -q '\"name\": \"alice\"' /etc/nixos/hosts/elitebook/user.json")
-        laptop.succeed("grep -q '\"fullName\": \"Alice Test\"' /etc/nixos/hosts/elitebook/user.json")
+        laptop.fail("test -e /etc/nixos/hosts/elitebook/user.json")
 
     with subtest("random Windows-style hostname from the installer"):
         host = laptop.succeed("hostname").strip()
         print(host)
         assert re.fullmatch(r"DESKTOP-[A-HJ-NP-Z0-9]{7}", host), host
         laptop.succeed(f"test \"$(cat /etc/hostname)\" = {host}")
-        laptop.succeed(f"grep -q '\"hostName\": \"{host}\"' /etc/nixos/hosts/elitebook/user.json")
+        laptop.fail("test -L /etc/hostname")
+        # A rebuild keeps it
+        laptop.succeed("/run/current-system/activate")
+        laptop.succeed(f"test \"$(cat /etc/hostname)\" = {host}")
+        # Older installs lose the NixOS-made file on the first rebuild; the
+        # running name is written back
+        laptop.succeed("rm /etc/hostname && /run/current-system/activate")
+        laptop.succeed(f"test \"$(cat /etc/hostname)\" = {host}")
 
     with subtest("report"):
         print(laptop.succeed("systemctl --failed --no-legend || true"))

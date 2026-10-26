@@ -104,13 +104,13 @@ with Nix (flakes enabled) to build the ISO.
    ```sh
    sudo nixbook-install
    ```
-   It asks for a username, full name, password (8+ characters) and a disk
-   passphrase (12+ characters; use 5+ words). Names the system already uses
-   are refused before anything is touched. Typing `WISSEN` erases
-   `/dev/nvme0n1` and installs. No internet is needed.
+   It only asks for a disk passphrase (12+ characters; use 5+ words). Typing
+   `WISSEN` erases `/dev/nvme0n1` and installs. No internet is needed.
 
 4. **First boots.**
    - Unlock the disk with your passphrase.
+   - GNOME's welcome screen asks for your name and password and makes the
+     account, as on a new Chromebook.
    - If the firmware is in Setup Mode, the system generates its Secure Boot
      keys, signs itself and reboots once. On the next boot, systemd-boot
      enrolls the keys.
@@ -120,10 +120,7 @@ with Nix (flakes enabled) to build the ISO.
    - Copy the keys and the LUKS header off the laptop:
      `sudo nixbook-backup-recovery /path/on/a/usb-stick`.
 
-5. **First boot with internet.** The Flatpaks install in the background. The
-   first automatic update writes your username and hostname into the system
-   configuration (from `/etc/nixos/hosts/elitebook/user.json`, which the
-   installer created).
+5. **First boot with internet.** The Flatpaks install in the background.
 
 ## Everyday use
 
@@ -145,15 +142,15 @@ commits your changes before it updates.
 ```
 flake.nix                  nixbook (the system), installer (the ISO), the VM test
 hosts/elitebook/
-  default.nix              module list, hostname
+  default.nix              module list, hostname handling
   hardware.nix             EliteBook 840 G10 hardware profile
   disko.nix                GPT: 1 GiB ESP + LUKS2 → btrfs subvolumes
-  user.json                username + hostname; null here, filled in by the installer
 installer/
   install.sh               the offline installer (nixbook-install)
   iso.nix, script.nix      the ISO and how the installer gets built
 modules/
-  base.nix                 Nix, locale, the user account, printing, fonts
+  base.nix                 Nix, locale, printing, fonts
+  accounts.nix             accounts made in GNOME, their groups and container IDs
   boot.nix                 lanzaboote Secure Boot, kernel, silent boot
   desktop.nix              GNOME, apps, Brave/Firefox policies, defaults
   flatpak.nix              Flathub apps and overrides, Gradia Capture
@@ -164,15 +161,17 @@ modules/
 tests/install.nix          end-to-end offline install test
 ```
 
-**Any username works.** The prebuilt system on the ISO has no user account and
-no hostname. The installer creates the account (UID 1000), writes a random
-`DESKTOP-XXXXXXX` to `/etc/hostname`, and stores both in `user.json`.
-Rebuilds then declare that account and hostname. Two safety checks:
-- A rebuild is refused if it would delete a normal account that an earlier
-  generation declared. NixOS would otherwise remove it, even with
-  `mutableUsers`.
-- An installed system whose `user.json` has no `hostName` fails to evaluate
-  instead of silently losing its hostname.
+**Accounts are not in the flake.** Like a Chromebook, accounts are data: GNOME's
+setup screen makes the first one, and Settings adds more. `accounts.nix` gives
+every account its container ID ranges, and administrators also get the
+`networkmanager`, `libvirtd`, `nordvpn`, `video` and `audio` groups. The
+installer writes a random `DESKTOP-XXXXXXX` to `/etc/hostname`; the flake sets
+no hostname, so rebuilds keep it.
+
+Laptops installed with the older `user.json` setup had their account declared.
+NixOS would delete such an account from a generation that no longer declares it,
+so that rebuild is refused with instructions. The hostname those laptops run
+with is written to `/etc/hostname` on the first rebuild.
 
 ## Development
 
@@ -184,19 +183,18 @@ nix fmt                                       # format the Nix files
 ```
 
 The test runs entirely offline in QEMU. It:
-- boots the installer and checks that bad usernames are refused before the
-  disk is touched;
+- boots the installer and checks that a missing passphrase is refused before
+  the disk is touched;
 - installs onto an empty NVMe disk;
 - boots with Secure Boot firmware in Setup Mode, unlocks LUKS, lets lanzaboote
   generate and enroll keys, and checks for `Secure Boot: enabled (user)`;
-- then checks the disk layout, the kernel, zram, the user and hostname, the
+- checks that GNOME's setup screen starts and makes accounts the way it does,
+  with admin groups only for administrators and working rootless containers;
+- then checks the disk layout, the kernel, zram, the hostname, the
   account-deletion guard, the security settings, the apps and the Gradia
   Capture service.
 
 It takes about 4 minutes once everything is built.
-
-Keep `hosts/elitebook/user.json` at `null` in the repo. On an installed
-laptop, that file in `/etc/nixos` must name its own account and hostname.
 
 Other hardware: the disk (`/dev/nvme0n1`), `hardware.nix` and the HP-specific
 Secure Boot hints are EliteBook-specific; the rest is generic NixOS.
@@ -205,9 +203,6 @@ Secure Boot hints are EliteBook-specific; the rest is generic NixOS.
 
 - Flatpaks and Gradia Capture need internet; until then they retry in the
   background.
-- The user account and hostname become part of the declared configuration
-  only after the first update, which needs internet. Until then they work as
-  normal mutable settings.
 - The USB stick does not boot while Secure Boot is on. To reinstall, turn
   Secure Boot off first.
 
@@ -227,8 +222,8 @@ volledige NixOS met terminal, containers en virtuele machines.
 
 - **Installeren:** zet in het BIOS (F10) Secure Boot en *Sure Start Secure Boot
   Keys Protection* uit, start van de USB-stick (F9) en typ `sudo nixbook-install`.
-  Je kiest een gebruikersnaam, wachtwoord en een lange wachtzin voor de
-  schijfversleuteling. Internet is niet nodig.
+  Je kiest alleen een lange wachtzin voor de schijfversleuteling; je account
+  maak je bij de eerste start in het welkomstscherm. Internet is niet nodig.
 - **Secure Boot:** de laptop maakt zelf eigen sleutels aan en schrijft ze in.
   Zet Secure Boot pas aan als `nixbook-secureboot` zegt dat je eigen sleutels in
   de firmware staan. Bij een herinstallatie: wis eerst de oude sleutels in het
