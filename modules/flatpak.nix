@@ -2,11 +2,12 @@
 { pkgs, lib, ... }:
 
 let
-  # Same steps as a hand install: clone into ~/Downloads/gradia-capture, pack
-  # with build.sh, install the zip. That checkout stays. build.sh starts with
-  # #!/bin/bash, and NixOS has no /bin/bash, so it only builds when invoked as
-  # `bash build.sh`. gnome-extensions install writes only into the logged-in
-  # user's home. There is no system copy.
+  # Same steps as a hand install: clone, pack with build.sh, install the zip.
+  # The clone is a temporary directory, removed once the zip is installed; a
+  # login only asks GitHub for the latest commit id and rebuilds when it moved.
+  # build.sh starts with #!/bin/bash, and NixOS has no /bin/bash, so it only
+  # builds when invoked as `bash build.sh`. gnome-extensions install writes
+  # only into the logged-in user's home. There is no system copy.
   gradiaCaptureFromGit = pkgs.writeShellScript "nixbook-gradia-capture" ''
     set -euo pipefail
     export PATH=${
@@ -34,41 +35,42 @@ let
     if [ "$uid" -lt 1000 ] || [ "$uid" -gt 29999 ] || [ -z "''${HOME:-}" ]; then
       exit 0
     fi
+    uuid=gradia-integration@alexandervanhee.github.io
+    repo=https://github.com/AlexanderVanhee/gradia-capture
+    installed="$HOME/.local/share/gnome-shell/extensions/$uuid"
+    stamp="$HOME/.local/state/nixbook/gradia-capture-rev"
+
+    # Earlier versions kept the checkout in ~/Downloads. Remove it only when it
+    # is the untouched upstream clone; anything else there belongs to the user.
+    old="$HOME/Downloads/gradia-capture"
+    if [ -d "$old/.git" ] &&
+      [ "$(git -C "$old" remote get-url origin 2>/dev/null)" = "$repo" ] &&
+      [ -z "$(git -C "$old" status --porcelain 2>/dev/null)" ]; then
+      rm -rf "$old"
+    fi
+
     # Fails until flatpak-managed-install has put Gradia on the system; the
     # unit then retries.
     ${pkgs.flatpak}/bin/flatpak info --system be.alexandervanhee.gradia >/dev/null
 
-    uuid=gradia-integration@alexandervanhee.github.io
-    installed="$HOME/.local/share/gnome-shell/extensions/$uuid"
-    stamp="$HOME/.local/state/nixbook/gradia-capture-rev"
-    # The hand install lives here and stays on disk. A fresh install clones
-    # into this directory; later runs update it in place.
-    src="$HOME/Downloads/gradia-capture"
-    mkdir -p "$HOME/Downloads"
-
-    if [ ! -d "$src/.git" ]; then
-      if [ -e "$src" ]; then
-        echo "$src bestaat al, maar is geen git-checkout." >&2
-        exit 1
+    # Only the commit id is fetched to see whether an update exists
+    if ! rev=$(git ls-remote "$repo" HEAD | cut -f1) || [ -z "$rev" ]; then
+      if [ -d "$installed" ]; then
+        echo "GitHub is onbereikbaar. De geïnstalleerde Gradia Capture blijft staan."
+        exit 0
       fi
-      if ! git clone https://github.com/AlexanderVanhee/gradia-capture "$src"; then
-        if [ -d "$installed" ]; then
-          echo "GitHub is onbereikbaar. De geïnstalleerde Gradia Capture blijft staan."
-          exit 0
-        fi
-        echo "Gradia Capture kon niet van GitHub worden gehaald." >&2
-        exit 1
-      fi
-    elif ! git -C "$src" pull --ff-only; then
-      echo "GitHub is onbereikbaar. De kopie in $src blijft staan."
+      echo "Gradia Capture kon niet van GitHub worden gehaald." >&2
+      exit 1
     fi
-
-    rev=$(git -C "$src" rev-parse HEAD)
     if [ -f "$stamp" ] && [ -d "$installed" ] && [ "$(cat "$stamp")" = "$rev" ]; then
-      echo "Gradia Capture $rev staat er al ($src)."
+      echo "Gradia Capture $rev staat er al."
       exit 0
     fi
 
+    src=$(mktemp -d)
+    trap 'rm -rf "$src"' EXIT
+    git clone --depth 1 "$repo" "$src"
+    rev=$(git -C "$src" rev-parse HEAD)
     ( cd "$src" && bash build.sh )
     zip="$src/$uuid.shell-extension.zip"
     [ -f "$zip" ]
@@ -94,6 +96,8 @@ in
       "org.mozilla.firefox" # policies in desktop.nix
       "io.github.diegopvlk.Cine" # video
       "org.gnome.Decibels" # audio
+      "org.gnome.SoundRecorder"
+      "io.github.alainm23.planify" # tasks
       "org.onlyoffice.desktopeditors" # office (own nl/en-GB dictionaries)
       "com.github.PintaProject.Pinta" # paint
       "be.alexandervanhee.gradia" # screenshot annotation, with Gradia Capture

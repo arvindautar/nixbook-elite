@@ -205,8 +205,9 @@ pkgs.testers.runNixOSTest {
 
     with subtest("gradia-capture installs in the graphical user's home"):
         # The VM has no internet, so the clone itself is not run here. The
-        # installed system must still carry the exact steps: clone the repo,
-        # bash build.sh (NixOS has no /bin/bash), then install the zip.
+        # installed system must still carry the exact steps: check the latest
+        # commit, shallow-clone into a temporary directory, bash build.sh
+        # (NixOS has no /bin/bash), install the zip, remove the clone.
         laptop.succeed(
             "test -L /etc/systemd/user/graphical-session.target.wants/nixbook-gradia-capture.service"
         )
@@ -216,8 +217,11 @@ pkgs.testers.runNixOSTest {
         assert script, "no ExecStart"
         laptop.succeed(
             f"grep -q 'flatpak info --system be.alexandervanhee.gradia' {script}; "
-            f"grep -q 'git clone https://github.com/AlexanderVanhee/gradia-capture' {script}; "
-            f"grep -q 'Downloads/gradia-capture' {script}; "
+            f"grep -q 'repo=https://github.com/AlexanderVanhee/gradia-capture' {script}; "
+            f"grep -qF 'git ls-remote \"$repo\" HEAD' {script}; "
+            f"grep -qF 'src=$(mktemp -d)' {script}; "
+            f"grep -qF 'git clone --depth 1 \"$repo\" \"$src\"' {script}; "
+            f"grep -qF 'rm -rf \"$src\"' {script}; "
             f"grep -q 'bash build.sh' {script}; "
             f"grep -q 'gnome-extensions install --force' {script}"
         )
@@ -225,9 +229,23 @@ pkgs.testers.runNixOSTest {
         # The GDM greeter session (uid above 29999) is skipped without retries.
         laptop.succeed(f"runuser -u nobody -- env HOME=/tmp/greeter {script}")
         laptop.fail("test -e /tmp/greeter/Downloads")
+        # A checkout left in ~/Downloads by earlier versions is removed when it
+        # is the untouched upstream clone, and kept when the user changed it.
+        old = "/home/alice/Downloads/gradia-capture"
+        laptop.succeed(
+            f"runuser -u alice -- sh -c 'mkdir -p {old} && cd {old} && git init -q && "
+            "git remote add origin https://github.com/AlexanderVanhee/gradia-capture'"
+        )
+        laptop.fail(f"runuser -u alice -- env HOME=/home/alice {script}")
+        laptop.fail(f"test -e {old}")
+        laptop.succeed(
+            f"runuser -u alice -- sh -c 'mkdir -p {old} && cd {old} && git init -q && "
+            "git remote add origin https://github.com/AlexanderVanhee/gradia-capture && touch mine'"
+        )
         # A real user waits for the Gradia Flatpak, which this offline VM lacks.
         laptop.fail(f"runuser -u alice -- env HOME=/home/alice {script}")
-        laptop.fail("test -e /home/alice/Downloads/gradia-capture")
+        laptop.succeed(f"test -e {old}/mine")
+        laptop.succeed(f"rm -rf {old}")
         laptop.fail("test -e /etc/systemd/system/nixbook-gradia-capture.service")
         laptop.fail("test -e /run/current-system/sw/share/gnome-shell/extensions/gradia-integration@alexandervanhee.github.io")
 
