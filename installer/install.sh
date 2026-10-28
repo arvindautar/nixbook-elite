@@ -100,7 +100,7 @@ printf '%s:%s\n' "$NB_USER" "$NB_PASSWORD" | nixos-enter --root /mnt -c chpasswd
 
 bold "4/4 Configuratie naar /etc/nixos kopiëren"
 # DESKTOP- plus 7 random characters, like a fresh Windows install. The flake
-# sets no hostname, so NixOS leaves /etc/hostname alone.
+# sets no hostname, so NixOS leaves this file alone, and hostnamed reads it.
 chars=ABCDEFGHJKLMNPQRSTUVWXYZ0123456789
 host=DESKTOP-
 for b in $(od -An -N7 -tu1 /dev/urandom); do host+=${chars:$((b % ${#chars})):1}; done

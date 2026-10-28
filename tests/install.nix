@@ -374,13 +374,16 @@ pkgs.testers.runNixOSTest {
         assert zone() == "Europe/Amsterdam", zone()
 
     with subtest("random Windows-style hostname from the installer"):
-        host = laptop.succeed("hostname").strip()
+        host = laptop.succeed("cat /etc/hostname").strip()
         print(host)
         assert re.fullmatch(r"DESKTOP-[A-HJ-NP-Z0-9]{7}", host), host
-        laptop.succeed(f"test \"$(cat /etc/hostname)\" = {host}")
+        # static hostname, not the transient IPv6 name NetworkManager would set
+        assert laptop.succeed("hostnamectl --static").strip() == host, host
+        assert laptop.succeed("hostname").strip() == host, host
         laptop.fail("test -L /etc/hostname")
         # rebuild keeps it
         laptop.succeed("/run/current-system/activate")
+        assert laptop.succeed("hostnamectl --static").strip() == host
         laptop.succeed(f"test \"$(cat /etc/hostname)\" = {host}")
         # older installs lose the NixOS-made file on the first rebuild, the
         # running name gets written back
