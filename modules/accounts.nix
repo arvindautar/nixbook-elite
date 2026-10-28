@@ -38,25 +38,41 @@ let
     map=/var/lib/nixos/auto-subuid-map
     [ -s "$map" ] || echo '{}' > "$map"
     sed -i '/^$/d' /etc/subuid /etc/subgid
-    awk -F: '$3 >= 1000 && $3 <= 29999 { print $1, 100000 + ($3 - 1000) * 65536 }' /etc/passwd |
-      while read -r name start; do
-        start=$(jq -r --arg n "$name" --argjson s "$start" '.[$n] // $s' "$map")
-        for f in /etc/subuid /etc/subgid; do
-          grep -q "^$name:" "$f" || echo "$name:$start:65536" >> "$f"
-        done
-        jq -c --arg n "$name" --argjson s "$start" '.[$n] = $s' "$map" > "$map.tmp"
-        mv "$map.tmp" "$map"
-
-        groups=" $(id -nG "$name") "
-        if [[ "$groups" == *" wheel "* ]]; then
-          # single usermod: every write to /etc/group triggers the path unit again
-          missing=
-          for g in ${lib.concatStringsSep " " adminGroups}; do
-            [[ "$groups" == *" $g "* ]] || missing+="''${missing:+,}$g"
+    # Accounts rewrites passwd and group a few times, and a path unit drops any
+    # change that arrives while this script is still running. Stay until both
+    # files have been quiet, so a new administrator is not left without groups.
+    exec 9>/run/nixbook-setup-accounts.lock
+    ${pkgs.util-linux}/bin/flock 9
+    quiet=0
+    while [ "$quiet" -lt 3 ]; do
+      before=$(stat -c '%.9Y %.9Z' /etc/passwd /etc/group)
+      awk -F: '$3 >= 1000 && $3 <= 29999 { print $1, 100000 + ($3 - 1000) * 65536 }' /etc/passwd |
+        while read -r name start; do
+          start=$(jq -r --arg n "$name" --argjson s "$start" '.[$n] // $s' "$map")
+          for f in /etc/subuid /etc/subgid; do
+            grep -q "^$name:" "$f" || echo "$name:$start:65536" >> "$f"
           done
-          [ -z "$missing" ] || usermod -aG "$missing" "$name"
-        fi
-      done
+          jq -c --arg n "$name" --argjson s "$start" '.[$n] = $s' "$map" > "$map.tmp"
+          mv "$map.tmp" "$map"
+
+          groups=" $(id -nG "$name") "
+          if [[ "$groups" == *" wheel "* ]]; then
+            # one usermod: each group write would start this service again
+            missing=
+            for g in ${lib.concatStringsSep " " adminGroups}; do
+              [[ "$groups" == *" $g "* ]] || missing+="''${missing:+,}$g"
+            done
+            [ -z "$missing" ] || usermod -aG "$missing" "$name"
+          fi
+        done
+      after=$(stat -c '%.9Y %.9Z' /etc/passwd /etc/group)
+      if [ "$before" = "$after" ]; then
+        quiet=$((quiet + 1))
+        [ "$quiet" -eq 3 ] || sleep 0.1
+      else
+        quiet=0
+      fi
+    done
   '';
 in
 {
