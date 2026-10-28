@@ -1,42 +1,118 @@
-# Same fonts as Omarchy: Liberation Sans/Serif (metric compatible with Arial
-# and Times New Roman) and JetBrainsMono Nerd Font. The UI font stays Adwaita
-# Sans. Helvetica & co. resolve to TeX Gyre, which GNOME already pulls in.
+# Generic families follow openSUSE fonts-config. The GNOME interface font
+# stays Adwaita Sans. Monospace stays JetBrainsMono Nerd Font.
 { pkgs, ... }:
 
 let
-  # From Omarchy's 50-omarchy.conf. Strong binding so the generic names always
-  # map to these, flatpaks included.
+  # Brave and LibreWolf. Leap 16 does not install Roboto Slab or Noto Serif,
+  # so serif resolves to Liberation Serif. Sans resolves to Roboto. Leap's
+  # fontconfig sends system-ui to Cantarell, which is not installed, and the
+  # remaining face is Roboto. Hinting is slight and subpixel is RGB.
+  browserFontconfig = ''
+    <?xml version="1.0"?>
+    <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+    <fontconfig>
+      <alias>
+        <family>sans-serif</family>
+        <prefer>
+          <family>Roboto</family>
+          <family>Noto Sans</family>
+          <family>Liberation Sans</family>
+          <family>DejaVu Sans</family>
+        </prefer>
+      </alias>
+      <alias>
+        <family>serif</family>
+        <prefer>
+          <family>Liberation Serif</family>
+          <family>DejaVu Serif</family>
+        </prefer>
+      </alias>
+      <alias>
+        <family>system-ui</family>
+        <prefer><family>Roboto</family></prefer>
+      </alias>
+      <alias>
+        <family>-apple-system</family>
+        <prefer><family>Roboto</family></prefer>
+      </alias>
+      <alias>
+        <family>BlinkMacSystemFont</family>
+        <prefer><family>Roboto</family></prefer>
+      </alias>
+      <alias>
+        <family>monospace</family>
+        <prefer>
+          <family>JetBrainsMono Nerd Font</family>
+        </prefer>
+      </alias>
+      <match target="pattern">
+        <test name="family"><string>ui-monospace</string></test>
+        <edit name="family" mode="assign" binding="strong"><string>JetBrainsMono Nerd Font</string></edit>
+      </match>
+      <match target="font">
+        <edit name="hintstyle" mode="assign"><const>hintslight</const></edit>
+      </match>
+      <match target="font">
+        <edit name="rgba" mode="assign"><const>rgb</const></edit>
+      </match>
+      <match target="font">
+        <edit name="lcdfilter" mode="assign"><const>lcddefault</const></edit>
+      </match>
+    </fontconfig>
+  '';
+
   fontconfig = ''
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
     <fontconfig>
+      <alias>
+        <family>sans-serif</family>
+        <prefer>
+          <family>Roboto</family>
+          <family>Noto Sans</family>
+          <family>Liberation Sans</family>
+          <family>DejaVu Sans</family>
+        </prefer>
+      </alias>
+      <alias>
+        <family>serif</family>
+        <prefer>
+          <family>Noto Serif</family>
+          <family>Liberation Serif</family>
+          <family>DejaVu Serif</family>
+        </prefer>
+      </alias>
+      <alias>
+        <family>monospace</family>
+        <prefer>
+          <family>JetBrainsMono Nerd Font</family>
+        </prefer>
+      </alias>
+      <!-- Replace the list. A later sans prefer would otherwise sit in front. -->
       <match target="pattern">
-        <test name="family" qual="any"><string>sans-serif</string></test>
-        <edit name="family" mode="assign" binding="strong"><string>Liberation Sans</string></edit>
-      </match>
-      <match target="pattern">
-        <test name="family" qual="any"><string>serif</string></test>
-        <edit name="family" mode="assign" binding="strong"><string>Liberation Serif</string></edit>
-      </match>
-      <match target="pattern">
-        <test name="family" qual="any"><string>monospace</string></test>
+        <test name="family"><string>ui-monospace</string></test>
         <edit name="family" mode="assign" binding="strong"><string>JetBrainsMono Nerd Font</string></edit>
       </match>
 
-      <!-- The system font websites ask for -->
-      <alias><family>system-ui</family><prefer><family>Liberation Sans</family></prefer></alias>
-      <alias><family>-apple-system</family><prefer><family>Liberation Sans</family></prefer></alias>
-      <alias><family>BlinkMacSystemFont</family><prefer><family>Liberation Sans</family></prefer></alias>
-      <alias><family>ui-monospace</family><default><family>monospace</family></default></alias>
+      <match target="font">
+        <edit name="hintstyle" mode="assign"><const>hintslight</const></edit>
+      </match>
+      <match target="font">
+        <edit name="rgba" mode="assign"><const>rgb</const></edit>
+      </match>
+      <match target="font">
+        <edit name="lcdfilter" mode="assign"><const>lcddefault</const></edit>
+      </match>
     </fontconfig>
   '';
 in
 {
   fonts = {
     packages = with pkgs; [
-      # Arial, Times New Roman and Courier New map to these through
-      # 30-metric-aliases.conf
+      # Roboto and Liberation are the faces Leap's browsers resolve.
+      roboto
       liberation_ttf
+      dejavu_fonts
       nerd-fonts.jetbrains-mono
       noto-fonts
       noto-fonts-cjk-sans
@@ -46,14 +122,22 @@ in
     fontDir.enable = true;
     fontconfig = {
       defaultFonts = {
-        sansSerif = [ "Liberation Sans" ];
-        serif = [ "Liberation Serif" ];
+        sansSerif = [
+          "Roboto"
+          "Noto Sans"
+          "Liberation Sans"
+          "DejaVu Sans"
+        ];
+        serif = [
+          "Noto Serif"
+          "Liberation Serif"
+          "DejaVu Serif"
+        ];
         monospace = [ "JetBrainsMono Nerd Font" ];
         emoji = [ "Noto Color Emoji" ];
       };
-      # same as Omarchy
       hinting.style = "slight";
-      subpixel.rgba = "none";
+      subpixel.rgba = "rgb";
       localConf = fontconfig;
     };
   };
@@ -67,8 +151,15 @@ in
     unitConfig.ConditionUser = "!@system"; # not the GDM greeter
     serviceConfig.Type = "oneshot";
     script = ''
-      ${pkgs.coreutils}/bin/install -D -m 0644 ${pkgs.writeText "50-nixbook-fonts.conf" fontconfig} \
+      ${pkgs.coreutils}/bin/install -D -m 0644 ${pkgs.writeText "50-nixbook-fonts.conf" browserFontconfig} \
         "$HOME/.config/fontconfig/conf.d/50-nixbook-fonts.conf"
+      # Brave and LibreWolf keep their own font cache. A new face stays invisible
+      # there until that cache is rebuilt.
+      for app in com.brave.Browser io.gitlab.librewolf-community; do
+        if ${pkgs.flatpak}/bin/flatpak info "$app" >/dev/null 2>&1; then
+          ${pkgs.flatpak}/bin/flatpak run --command=fc-cache "$app" -f || true
+        fi
+      done
     '';
   };
   systemd.user.tmpfiles.rules = [
@@ -89,6 +180,7 @@ in
         monospace-font-name = "JetBrainsMono Nerd Font 11";
         font-antialiasing = "grayscale";
         font-hinting = "slight";
+        font-rgba-order = "rgb";
       };
     }
   ];

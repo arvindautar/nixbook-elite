@@ -223,22 +223,28 @@ pkgs.testers.runNixOSTest {
         assert "alice" in out, out
         laptop.succeed("cp /tmp/decl /var/lib/nixos/declarative-users")
 
-    with subtest("fonts as on Omarchy, also for Flatpaks"):
+    with subtest("fonts: Leap families, JetBrains Mono, also for Flatpaks"):
         fc = "${target.pkgs.fontconfig.bin}/bin/fc-match -f '%{family}\\n'"
         for generic, family in [
-            ("sans-serif", "Liberation Sans"),
-            ("serif", "Liberation Serif"),
+            ("sans-serif", "Roboto"),
+            ("serif", "Noto Serif"),
             ("monospace", "JetBrainsMono Nerd Font"),
-            ("system-ui", "Liberation Sans"),
+            ("ui-monospace", "JetBrainsMono Nerd Font"),
+            ("system-ui", "Adwaita Sans"),
             ("emoji", "Noto Color Emoji"),
             ("Arial", "Liberation Sans"),
             ("Times New Roman", "Liberation Serif"),
             ("Courier New", "Liberation Mono"),
             ("Helvetica", "TeX Gyre Heros"),
         ]:
-            out = laptop.succeed(fc + " '" + generic + "'")
+            out = laptop.succeed(fc + " :family='" + generic + "'")
             print(generic, "->", out)
             assert family in out, (generic, out)
+        render = laptop.succeed(
+            "${target.pkgs.fontconfig.bin}/bin/fc-match -f '%{hintstyle} %{rgba}\\n' :family=sans-serif"
+        ).strip()
+        print("render", render)
+        assert render == "1 1", render
         # the copy flatpaks read
         conf = "/home/alice/.config/fontconfig/conf.d/50-nixbook-fonts.conf"
         script = laptop.succeed(
@@ -249,7 +255,9 @@ pkgs.testers.runNixOSTest {
         # specifiers that need a session get skipped here, so check the result,
         # not the exit code
         laptop.execute("runuser -u alice -- env HOME=/home/alice systemd-tmpfiles --user --create")
-        laptop.succeed(f"test -f {conf} && ! test -L {conf} && grep -q 'Liberation Sans' {conf}")
+        laptop.succeed(f"test -f {conf} && ! test -L {conf} && grep -q 'Roboto' {conf}")
+        laptop.succeed(f"grep -q 'Liberation Serif' {conf}")
+        laptop.succeed(f"grep -q 'JetBrainsMono Nerd Font' {conf}")
         laptop.succeed("grep -qx 'font-family = JetBrainsMono Nerd Font' /home/alice/.config/ghostty/config")
         laptop.succeed("grep -q 'xdg-config/fontconfig:ro' /var/lib/flatpak/overrides/global")
 
