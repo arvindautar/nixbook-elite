@@ -51,8 +51,20 @@ let
     if [ ! -s "$pw" ]; then
       umask 077
       ${pkgs.openssl}/bin/openssl rand -base64 32 > "$pw"
-      echo "Nieuw restic-wachtwoord: $pw"
-      echo "Kopieer dat bestand van de laptop af, samen met de Secure Boot-sleutels."
+      echo "Nieuw restic-wachtwoordbestand: $pw"
+      echo "Dit is niet je inlogwachtwoord en niet de wachtzin van de schijf."
+      echo "Kopieer het bestand van de laptop af, samen met de Secure Boot-sleutels."
+      echo "Zonder dit bestand kun je de backup niet terugzetten."
+      # The timer runs as root, so the notice has to be sent into the login session.
+      for uid in $(${pkgs.systemd}/bin/loginctl list-users --no-legend | ${pkgs.gawk}/bin/awk '{print $1}'); do
+        user=$(${pkgs.coreutils}/bin/id -nu "$uid") || continue
+        [ -S "/run/user/$uid/bus" ] || continue
+        ${pkgs.util-linux}/bin/runuser -u "$user" -- env \
+          DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
+          ${pkgs.libnotify}/bin/notify-send -a "Backup" \
+          "Backup-wachtwoord aangemaakt" \
+          "Het staat in $pw. Het is niet je inlogwachtwoord. Kopieer dat bestand van de laptop af, anders kun je de backup niet terugzetten." || true
+      done
     fi
     export RESTIC_PASSWORD_FILE=$pw
     repo=$mnt/restic
