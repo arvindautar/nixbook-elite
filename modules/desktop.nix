@@ -169,7 +169,6 @@ in
         "org/gnome/desktop/interface" = {
           show-battery-percentage = true;
           clock-show-weekday = true;
-          monospace-font-name = "JetBrains Mono 11";
         };
         # Week numbers in the top bar clock/calendar
         "org/gnome/desktop/calendar".show-weekdate = true;

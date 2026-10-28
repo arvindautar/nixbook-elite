@@ -1,6 +1,6 @@
-# Accounts are data, not configuration: like a Chromebook, the first account is
-# made at first boot in GNOME's setup screen and never appears in this flake.
-# Everything an account needs (groups, container ID ranges) is given to it by
+# Accounts are data, not configuration: the installer makes the first account
+# and GNOME Settings adds more, but none appears in this flake. Everything an
+# account needs (groups, container ID ranges) is given to it by
 # name-independent rules here, so the prebuilt offline system is complete.
 {
   config,
@@ -10,7 +10,8 @@
 }:
 
 let
-  # Admins (wheel) get what the installer used to give the first user
+  # Admins (wheel) also get these. The installer gives them to the first
+  # account itself; this covers admins made later in GNOME Settings.
   adminGroups = [
     "networkmanager"
     "libvirtd"
@@ -56,9 +57,9 @@ let
       done
   '';
 
-  # Pages for settings this flake fixes (language, keyboard, time zone) or apps
-  # it does not ship. NixOS's own copy also skips account and password, which
-  # leaves a fresh install without a way to make its first account.
+  # gnome-initial-setup still runs once at an account's first login. Skip the
+  # pages for settings this flake fixes (language, keyboard, time zone) or
+  # apps it does not ship.
   initialSetupVendorConf = pkgs.writeText "vendor.conf" ''
     [pages]
     skip=language;keyboard;timezone;software;
@@ -83,18 +84,11 @@ in
     })
   ];
 
-  # NixOS creates this marker so GDM never offers to create an account. GDM
-  # only runs setup while there are no accounts, so removing it is harmless
-  # afterwards.
-  systemd.services.display-manager.preStart = lib.mkAfter ''
-    rm -f /run/gdm/gdm.ran-initial-setup
-  '';
-
   system.activationScripts.nixbookAccounts = {
     deps = [ "users" ];
     text = "${setupAccounts}";
   };
-  # GNOME's setup screen and Settings add accounts and admin rights at runtime
+  # The installer and GNOME Settings add accounts and admin rights at runtime
   systemd.paths.nixbook-setup-accounts = {
     wantedBy = [ "multi-user.target" ];
     pathConfig.PathChanged = [

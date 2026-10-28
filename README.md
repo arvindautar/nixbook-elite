@@ -104,13 +104,13 @@ with Nix (flakes enabled) to build the ISO.
    ```sh
    sudo nixbook-install
    ```
-   It only asks for a disk passphrase (12+ characters; use 5+ words). Typing
-   `WISSEN` erases `/dev/nvme0n1` and installs. No internet is needed.
+   It asks for a username, your full name, a password (8+ characters) and a
+   disk passphrase (12+ characters; use 5+ words). Typing `WISSEN` erases
+   `/dev/nvme0n1` and installs. No internet is needed.
 
 4. **First boots.**
    - Unlock the disk with your passphrase.
-   - GNOME's welcome screen asks for your name and password and makes the
-     account, as on a new Chromebook.
+   - Log in with the account you made in the installer.
    - If the firmware is in Setup Mode, the system generates its Secure Boot
      keys, signs itself and reboots once. On the next boot, systemd-boot
      enrolls the keys.
@@ -149,8 +149,9 @@ installer/
   install.sh               the offline installer (nixbook-install)
   iso.nix, script.nix      the ISO and how the installer gets built
 modules/
-  base.nix                 Nix, locale, printing, fonts
-  accounts.nix             accounts made in GNOME, their groups and container IDs
+  base.nix                 Nix, locale, printing
+  fonts.nix                Liberation Sans/Serif and JetBrainsMono Nerd Font, as on Omarchy
+  accounts.nix             groups and container IDs for every account
   boot.nix                 lanzaboote Secure Boot, kernel, silent boot
   desktop.nix              GNOME, apps, Brave/Firefox policies, defaults
   flatpak.nix              Flathub apps and overrides, Gradia Capture
@@ -161,8 +162,8 @@ modules/
 tests/install.nix          end-to-end offline install test
 ```
 
-**Accounts are not in the flake.** Like a Chromebook, accounts are data: GNOME's
-setup screen makes the first one, and Settings adds more. `accounts.nix` gives
+**Accounts are not in the flake.** Accounts are data: the installer makes the
+first one (an administrator), and GNOME Settings adds more. `accounts.nix` gives
 every account its container ID ranges, and administrators also get the
 `networkmanager`, `libvirtd`, `nordvpn`, `video` and `audio` groups. The
 installer writes a random `DESKTOP-XXXXXXX` to `/etc/hostname`; the flake sets
@@ -183,13 +184,13 @@ nix fmt                                       # format the Nix files
 ```
 
 The test runs entirely offline in QEMU. It:
-- boots the installer and checks that a missing passphrase is refused before
-  the disk is touched;
+- boots the installer and checks that a missing password or passphrase, or a
+  reserved or invalid username, is refused before the disk is touched;
 - installs onto an empty NVMe disk;
 - boots with Secure Boot firmware in Setup Mode, unlocks LUKS, lets lanzaboote
   generate and enroll keys, and checks for `Secure Boot: enabled (user)`;
-- checks that GNOME's setup screen starts and makes accounts the way it does,
-  with admin groups only for administrators and working rootless containers;
+- checks the installed account and a normal login screen, admin groups only
+  for administrators and working rootless containers;
 - then checks the disk layout, the kernel, zram, the hostname, the
   account-deletion guard, the security settings, the apps and the Gradia
   Capture service.
@@ -222,8 +223,8 @@ volledige NixOS met terminal, containers en virtuele machines.
 
 - **Installeren:** zet in het BIOS (F10) Secure Boot en *Sure Start Secure Boot
   Keys Protection* uit, start van de USB-stick (F9) en typ `sudo nixbook-install`.
-  Je kiest alleen een lange wachtzin voor de schijfversleuteling; je account
-  maak je bij de eerste start in het welkomstscherm. Internet is niet nodig.
+  Je kiest een gebruikersnaam, wachtwoord en een lange wachtzin voor de
+  schijfversleuteling. Internet is niet nodig.
 - **Secure Boot:** de laptop maakt zelf eigen sleutels aan en schrijft ze in.
   Zet Secure Boot pas aan als `nixbook-secureboot` zegt dat je eigen sleutels in
   de firmware staan. Bij een herinstallatie: wis eerst de oude sleutels in het

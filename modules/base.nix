@@ -64,16 +64,6 @@
     tpm2-tools
   ];
 
-  fonts = {
-    packages = with pkgs; [
-      noto-fonts
-      noto-fonts-cjk-sans
-      noto-fonts-color-emoji
-      jetbrains-mono
-    ];
-    fontDir.enable = true;
-  };
-
   documentation = {
     nixos.enable = false;
     doc.enable = false;

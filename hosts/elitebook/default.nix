@@ -9,6 +9,7 @@
     ../../modules/accounts.nix
     ../../modules/boot.nix
     ../../modules/desktop.nix
+    ../../modules/fonts.nix
     ../../modules/flatpak.nix
     ../../modules/spelling.nix
     ../../modules/security.nix

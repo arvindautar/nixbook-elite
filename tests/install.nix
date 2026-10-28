@@ -42,6 +42,7 @@ let
 
   ovmf = pkgs.OVMFFull.fd;
   luks = "correct horse battery staple";
+  installEnv = "NB_USER=alice NB_FULLNAME='Alice Test' NB_PASSWORD=foobar123 NB_LUKS='${luks}' NB_CONFIRM=yes";
 in
 pkgs.testers.runNixOSTest {
   name = "nixbook-install";
@@ -78,15 +79,22 @@ pkgs.testers.runNixOSTest {
     with subtest("install"):
         installer.start()
         installer.wait_for_unit("multi-user.target")
-        # Refused before anything is wiped: a missing passphrase in a
-        # non-interactive run
-        installer.fail("NB_LUKS= NB_CONFIRM=yes nixbook-install < /dev/null")
+        # Refused before anything is wiped: a missing secret, a reserved or
+        # invalid name, a ':' in the full name
+        installer.fail("${installEnv} NB_PASSWORD= nixbook-install < /dev/null")
+        installer.fail("${installEnv} NB_LUKS= nixbook-install < /dev/null")
+        installer.fail("${installEnv} NB_USER=nordvpn nixbook-install < /dev/null")
+        installer.fail("${installEnv} NB_USER=Alice nixbook-install < /dev/null")
+        installer.fail("${installEnv} NB_FULLNAME=a:b nixbook-install < /dev/null")
         installer.fail("test -e /dev/nvme0n1p1")
-        print(installer.succeed("NB_LUKS='${luks}' NB_CONFIRM=yes nixbook-install 2>&1"))
+        print(installer.succeed("${installEnv} nixbook-install 2>&1"))
         installer.succeed("test ! -e /tmp/nixbook-luks.key")
         installer.succeed("cryptsetup luksDump /dev/nvme0n1p2 | grep -q 'Version:.*2'")
         installer.succeed("cryptsetup luksDump /dev/nvme0n1p2 | grep -q argon2id")
         installer.succeed("test -f /mnt/etc/nixos/flake.nix -a -f /mnt/etc/nixos/flake.lock")
+        # The account is complete before the first boot
+        for g in ["wheel", "networkmanager", "libvirtd", "nordvpn", "video", "audio"]:
+            installer.succeed(f"grep -E '^{g}:.*[:,]alice(,|$)' /mnt/etc/group")
         installer.shutdown()
 
     # Secure Boot capable firmware with empty key store (= Setup Mode)
@@ -151,25 +159,19 @@ pkgs.testers.runNixOSTest {
         laptop.succeed("grep -q zstd /sys/block/zram0/comp_algorithm")
         laptop.succeed("test $(sysctl -n vm.swappiness) = 180")
 
-    with subtest("first boot: GNOME's setup screen makes the first account"):
-        laptop.fail("getent passwd | awk -F: '$3 >= 1000 && $3 <= 29999' | grep .")
+    with subtest("first boot: the installed account, a normal login screen"):
+        laptop.succeed("test \"$(getent passwd alice | cut -d: -f5)\" = 'Alice Test'")
+        laptop.succeed("passwd -S alice | grep -q ' P '")
         laptop.wait_for_unit("display-manager.service")
-        laptop.fail("test -e /run/gdm/gdm.ran-initial-setup")
-        laptop.wait_until_succeeds("pgrep -f 'gnome-initial-setup' >&2", timeout=300)
-        # GDM mode (makes an account), not the per-user first-login mode
-        laptop.fail("pgrep -f 'gnome-initial-setup --existing-user'")
-        # Its vendor.conf skips the pages this flake fixes, not account or password
+        # GDM runs no account-making setup session while an account exists
+        laptop.wait_until_succeeds("pgrep -f '[g]nome-shell'", timeout=300)
+        laptop.fail("pgrep -af '[g]nome-initial-setup' | grep -v existing-user")
+        # The first-login setup skips the pages this flake fixes
         conf = laptop.succeed(
             "cat $(grep -ao '/nix/store/[a-z0-9]*-vendor.conf' "
             "${target.pkgs.gnome-initial-setup}/libexec/.gnome-initial-setup-wrapped | head -1)"
         )
         assert "skip=language;keyboard;timezone;software;" in conf, conf
-        # What the account page does: an administrator through accountsservice
-        laptop.succeed(
-            "busctl call org.freedesktop.Accounts /org/freedesktop/Accounts "
-            "org.freedesktop.Accounts CreateUser ssi alice 'Alice Test' 1"
-        )
-        laptop.succeed("echo alice:foobar123 | chpasswd")
 
     with subtest("the first account gets the admin groups"):
         laptop.wait_until_succeeds("id -nG alice | grep -qw nordvpn", timeout=60)
@@ -215,6 +217,36 @@ pkgs.testers.runNixOSTest {
         out = laptop.fail("/run/current-system/bin/switch-to-configuration check 2>&1")
         assert "alice" in out, out
         laptop.succeed("cp /tmp/decl /var/lib/nixos/declarative-users")
+
+    with subtest("fonts as on Omarchy, also for Flatpaks"):
+        fc = "${target.pkgs.fontconfig.bin}/bin/fc-match -f '%{family}\\n'"
+        for generic, family in [
+            ("sans-serif", "Liberation Sans"),
+            ("serif", "Liberation Serif"),
+            ("monospace", "JetBrainsMono Nerd Font"),
+            ("system-ui", "Liberation Sans"),
+            ("emoji", "Noto Color Emoji"),
+            ("Arial", "Liberation Sans"),
+            ("Times New Roman", "Liberation Serif"),
+            ("Courier New", "Liberation Mono"),
+            ("Helvetica", "TeX Gyre Heros"),
+        ]:
+            out = laptop.succeed(fc + " '" + generic + "'")
+            print(generic, "->", out)
+            assert family in out, (generic, out)
+        # The copy in the home directory that Flatpaks read
+        conf = "/home/alice/.config/fontconfig/conf.d/50-nixbook-fonts.conf"
+        script = laptop.succeed(
+            "sed -n 's/^ExecStart=//p' /etc/systemd/user/nixbook-fontconfig.service"
+        ).strip()
+        laptop.succeed(f"runuser -u alice -- env HOME=/home/alice {script}")
+        laptop.succeed(f"test $(stat -c %U {conf}) = alice")
+        # Specifiers that need a login session are skipped here, so only the
+        # result counts, not the exit code
+        laptop.execute("runuser -u alice -- env HOME=/home/alice systemd-tmpfiles --user --create")
+        laptop.succeed(f"test -f {conf} && ! test -L {conf} && grep -q 'Liberation Sans' {conf}")
+        laptop.succeed("grep -qx 'font-family = JetBrainsMono Nerd Font' /home/alice/.config/ghostty/config")
+        laptop.succeed("grep -q 'xdg-config/fontconfig:ro' /var/lib/flatpak/overrides/global")
 
     with subtest("security"):
         laptop.succeed("cat /sys/kernel/security/lsm | grep -q apparmor")

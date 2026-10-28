@@ -16,11 +16,14 @@ pkgs.writeShellApplication {
   ];
   text =
     lib.replaceStrings
-      [ "@toplevel@" "@disko@" "@flake@" ]
+      [ "@toplevel@" "@disko@" "@flake@" "@reserved@" ]
       [
         "${target.config.system.build.toplevel}"
         "${target.config.system.build.diskoScript}"
         "${flakeSource}"
+        (lib.concatStringsSep " " (
+          lib.attrNames target.config.users.users ++ lib.attrNames target.config.users.groups
+        ))
       ]
       (builtins.readFile ./install.sh);
 }
