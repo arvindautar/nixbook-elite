@@ -13,13 +13,14 @@
         "nix-command"
         "flakes"
       ];
-      auto-optimise-store = true;
       # Only admins may talk to the nix daemon
       allowed-users = [ "@wheel" ];
       trusted-users = [ "root" ];
       max-jobs = "auto";
       download-buffer-size = 268435456;
     };
+    # Deduplicate the store weekly, not during every build
+    optimise.automatic = true;
     # Builds and updates never make the desktop stutter
     daemonCPUSchedPolicy = "idle";
     daemonIOSchedClass = "idle";
@@ -30,9 +31,22 @@
   systemd.services.nix-daemon.environment.TMPDIR = "/var/tmp";
 
   # Dutch UI and formats, US keyboard with € on AltGr+5
-  time.timeZone = "Europe/Amsterdam";
+  # The time zone is the user's: Amsterdam to start with, changeable in
+  # Settings > Date & Time (by hand; location services stay off).
+  time.timeZone = null;
+  # A fresh install has no /etc/localtime yet. Laptops installed while the
+  # flake fixed the zone lose NixOS's link on their first rebuild. Both get
+  # Amsterdam; a zone chosen in Settings is left alone.
+  system.activationScripts.nixbookTimeZone = {
+    deps = [ "etc" ];
+    text = ''
+      if [ ! -e /etc/localtime ]; then
+        ln -sfn /etc/zoneinfo/Europe/Amsterdam /etc/localtime
+      fi
+    '';
+  };
   i18n.defaultLocale = "nl_NL.UTF-8";
-  i18n.extraLocales = [ "en_US.UTF-8/UTF-8" ];
+  i18n.extraLocales = [ "en_GB.UTF-8/UTF-8" ]; # British English, in Settings
   services.xserver.xkb = {
     layout = "us";
     variant = "euro";

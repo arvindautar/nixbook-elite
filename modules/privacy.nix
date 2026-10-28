@@ -17,6 +17,9 @@
         "ipv6.dhcp-send-hostname" = false;
         "ipv6.ip6-privacy" = 2;
         "ipv6.addr-gen-mode" = "stable-privacy";
+        # NetworkManager's default DHCPv6 identity (DUID) is one ID made from
+        # /etc/machine-id, the same on every network. This one differs per network.
+        "ipv6.dhcp-duid" = "stable-uuid";
         "connection.llmnr" = 0;
         # mDNS is avahi's job (printers); resolved has it off, see below
         "connection.mdns" = 0;
@@ -25,6 +28,10 @@
       connectivity.enabled = false;
     };
     dns = "systemd-resolved";
+    # Wi-Fi only. Wired ports, including a monitor's or dock's network port
+    # over USB-C and USB tethering from a phone, are left alone: no DHCP, no
+    # address, nothing sent. Remove this line to use a network cable.
+    unmanaged = [ "type:ethernet" ];
   };
 
   services.resolved = {

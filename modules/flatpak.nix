@@ -79,6 +79,11 @@ let
     printf '%s\n' "$rev" > "$stamp"
     echo "Gradia Capture $rev geïnstalleerd. Log uit en weer in om hem te laden."
   '';
+  onlyDownloads.Context.filesystems = [
+    "!home"
+    "!host"
+    "xdg-download"
+  ];
 in
 {
   services.flatpak = {
@@ -93,7 +98,6 @@ in
     packages = [
       "com.github.tchx84.Flatseal"
       "com.brave.Browser"
-      "org.mozilla.firefox" # policies in desktop.nix
       "io.github.diegopvlk.Cine" # video
       "org.gnome.Decibels" # audio
       "org.gnome.SoundRecorder"
@@ -108,14 +112,20 @@ in
       "it.mijorus.smile" # emoji picker
       "com.mattjakeman.ExtensionManager" # browse/install GNOME extensions
     ];
-    # OnlyOffice opens documents from others and is online: no access to every
-    # file, only these folders. Elsewhere, open the file from Nautilus.
-    overrides.settings."org.onlyoffice.desktopeditors".Context.filesystems = [
-      "!host"
-      "xdg-documents"
-      "xdg-download"
-      "xdg-desktop"
-    ];
+    overrides.settings = {
+      # OnlyOffice opens documents from others and is online: no access to every
+      # file, only these folders. Elsewhere, open the file from Nautilus.
+      "org.onlyoffice.desktopeditors".Context.filesystems = [
+        "!host"
+        "xdg-documents"
+        "xdg-download"
+        "xdg-desktop"
+      ];
+      # Browsers open untrusted pages: only Downloads, not the whole home folder.
+      # Uploading from elsewhere still works through the file chooser portal.
+      "com.brave.Browser" = onlyDownloads;
+      "io.gitlab.librewolf-community" = onlyDownloads;
+    };
     # Never remove apps that were installed through Bazaar
     uninstallUnmanaged = false;
     # Daily updates of all apps (not only the ones listed here) live in updates.nix

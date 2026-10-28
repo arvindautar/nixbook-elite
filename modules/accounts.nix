@@ -50,19 +50,15 @@ let
 
         groups=" $(id -nG "$name") "
         if [[ "$groups" == *" wheel "* ]]; then
+          # One usermod for all missing groups: every write to /etc/group
+          # starts this service again through the path unit
+          missing=
           for g in ${lib.concatStringsSep " " adminGroups}; do
-            [[ "$groups" == *" $g "* ]] || usermod -aG "$g" "$name"
+            [[ "$groups" == *" $g "* ]] || missing+="''${missing:+,}$g"
           done
+          [ -z "$missing" ] || usermod -aG "$missing" "$name"
         fi
       done
-  '';
-
-  # gnome-initial-setup still runs once at an account's first login. Skip the
-  # pages for settings this flake fixes (language, keyboard, time zone) or
-  # apps it does not ship.
-  initialSetupVendorConf = pkgs.writeText "vendor.conf" ''
-    [pages]
-    skip=language;keyboard;timezone;software;
   '';
 in
 {
@@ -74,15 +70,9 @@ in
     nordvpn = { };
   };
 
-  nixpkgs.overlays = [
-    (_: prev: {
-      gnome-initial-setup = prev.gnome-initial-setup.overrideAttrs (old: {
-        mesonFlags = lib.filter (f: !lib.hasPrefix "-Dvendor-conf-file=" f) old.mesonFlags ++ [
-          "-Dvendor-conf-file=${initialSetupVendorConf}"
-        ];
-      });
-    })
-  ];
+  # No first-login wizard. The installer makes the account and this flake sets
+  # everything it would ask; its privacy page could even turn location back on.
+  services.gnome.gnome-initial-setup.enable = false;
 
   system.activationScripts.nixbookAccounts = {
     deps = [ "users" ];
@@ -98,6 +88,10 @@ in
   };
   systemd.services.nixbook-setup-accounts = {
     description = "Give new accounts their groups and container ID ranges";
+    # Making an account writes /etc/passwd and /etc/group several times, and so
+    # does this service. A second run changes nothing, so no start limit: hitting
+    # it would also stop the path unit until the next boot.
+    unitConfig.StartLimitIntervalSec = 0;
     serviceConfig = {
       Type = "oneshot";
       ExecStart = setupAccounts;

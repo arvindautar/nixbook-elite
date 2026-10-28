@@ -26,8 +26,7 @@
     ];
   };
   environment.sessionVariables.LIBVA_DRIVER_NAME = "iHD";
-  # GuC submission + HuC firmware for the iGPU (lower CPU use, better media power)
-  boot.kernelParams = [ "i915.enable_guc=3" ];
+  # GuC submission and HuC are already the i915 default on Raptor Lake
 
   # Synaptics 06cb:00f0 fingerprint reader (enroll in GNOME Settings, optional)
   services.fprintd.enable = true;

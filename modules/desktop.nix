@@ -7,64 +7,6 @@
   ...
 }:
 
-let
-  # Privacy without breaking sites; DNS is left to the network on purpose
-  firefoxPolicies = pkgs.writeText "policies.json" (
-    builtins.toJSON {
-      policies = {
-        DisableTelemetry = true;
-        DisableFirefoxStudies = true;
-        DisablePocket = true;
-        DontCheckDefaultBrowser = true;
-        DisableFeedbackCommands = true;
-        OverrideFirstRunPage = "";
-        EnableTrackingProtection = {
-          Value = true;
-          Locked = false;
-          Cryptomining = true;
-          Fingerprinting = true;
-          EmailTracking = true;
-        };
-        HttpsOnlyMode = "enabled";
-        FirefoxHome = {
-          SponsoredTopSites = false;
-          SponsoredPocket = false;
-          Pocket = false;
-        };
-        FirefoxSuggest = {
-          SponsoredSuggestions = false;
-          WebSuggestions = false;
-          ImproveSuggest = false;
-        };
-        UserMessaging = {
-          ExtensionRecommendations = false;
-          FeatureRecommendations = false;
-          SkipOnboarding = true;
-          MoreFromMozilla = false;
-        };
-        Preferences = {
-          "browser.contentblocking.category" = {
-            Value = "strict";
-            Status = "default";
-          };
-          "dom.private-attribution.submission.enabled" = {
-            Value = false;
-            Status = "locked";
-          };
-          "media.ffmpeg.vaapi.enabled" = {
-            Value = true;
-            Status = "default";
-          };
-          "intl.locale.requested" = {
-            Value = "nl,en-US";
-            Status = "default";
-          };
-        };
-      };
-    }
-  );
-in
-
 {
   services.displayManager.gdm.enable = true;
   services.desktopManager.gnome.enable = true;
@@ -108,18 +50,11 @@ in
     settings.default = [ "com.mitchellh.ghostty.desktop" ];
   };
 
-  # Firefox is the Flatpak (flatpak.nix), so it updates as often as the other
-  # browsers. The Flatpak reads policies from its systemconfig extension
-  # directory. A real file: the sandbox can't follow links into /nix/store.
-  system.activationScripts.firefoxPolicies = ''
-    ${pkgs.coreutils}/bin/install -D -m 0444 ${firefoxPolicies} \
-      /var/lib/flatpak/extension/org.mozilla.firefox.systemconfig/x86_64/stable/policies/policies.json
-  '';
-
   # The Brave Flatpak reads the host's /etc/brave/policies. This turns off what
   # Brave sends on its own. Safe Browsing, component updates (ad-block lists,
   # certificate revocation) and variations (remote fixes) stay on for security;
-  # Leo, Translate, Sync, Wayback Machine and search suggestions stay the user's choice.
+  # Leo (AI) is off, like Brave Origin; Translate, Sync, Wayback Machine and search
+  # suggestions stay the user's choice.
   # A real file, not a symlink: the sandbox can't see /etc/static (/nix/store).
   environment.etc."brave/policies/managed/nixbook.json".mode = "0444";
   environment.etc."brave/policies/managed/nixbook.json".text = builtins.toJSON {
@@ -134,6 +69,8 @@ in
     BraveVPNDisabled = true;
     BraveNewsDisabled = true;
     BraveTalkDisabled = true;
+    # Leo, the AI assistant: sends what you ask (and page content) to Brave's servers
+    BraveAIChatEnabled = false;
     # Don't preload pages you never open
     NetworkPredictionOptions = 2;
     # Closing the last window really quits, so an update is used on the next start

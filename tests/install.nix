@@ -163,15 +163,10 @@ pkgs.testers.runNixOSTest {
         laptop.succeed("test \"$(getent passwd alice | cut -d: -f5)\" = 'Alice Test'")
         laptop.succeed("passwd -S alice | grep -q ' P '")
         laptop.wait_for_unit("display-manager.service")
-        # GDM runs no account-making setup session while an account exists
+        # No setup screen in GDM, and no first-login wizard either
         laptop.wait_until_succeeds("pgrep -f '[g]nome-shell'", timeout=300)
-        laptop.fail("pgrep -af '[g]nome-initial-setup' | grep -v existing-user")
-        # The first-login setup skips the pages this flake fixes
-        conf = laptop.succeed(
-            "cat $(grep -ao '/nix/store/[a-z0-9]*-vendor.conf' "
-            "${target.pkgs.gnome-initial-setup}/libexec/.gnome-initial-setup-wrapped | head -1)"
-        )
-        assert "skip=language;keyboard;timezone;software;" in conf, conf
+        laptop.fail("pgrep -af '[g]nome-initial-setup'")
+        laptop.fail("test -e /etc/xdg/autostart/gnome-initial-setup-first-login.desktop")
 
     with subtest("the first account gets the admin groups"):
         laptop.wait_until_succeeds("id -nG alice | grep -qw nordvpn", timeout=60)
@@ -193,6 +188,21 @@ pkgs.testers.runNixOSTest {
         out = laptop.succeed("id -nG bob")
         for g in ["wheel", "libvirtd", "nordvpn"]:
             assert g not in out.split(), f"bob in {g}: {out}"
+
+    with subtest("an administrator made in GNOME Settings gets the admin groups"):
+        # Adding the groups writes /etc/group, which starts the service again;
+        # that must not run into systemd's start limit
+        laptop.succeed(
+            "busctl call org.freedesktop.Accounts /org/freedesktop/Accounts "
+            "org.freedesktop.Accounts CreateUser ssi carol 'Carol Test' 1"
+        )
+        laptop.wait_until_succeeds("id -nG carol | grep -qw nordvpn", timeout=60)
+        out = laptop.succeed("id -nG carol").split()
+        for g in ["wheel", "networkmanager", "libvirtd", "nordvpn", "video", "audio"]:
+            assert g in out, f"carol not in {g}: {out}"
+        laptop.succeed("systemctl is-active nixbook-setup-accounts.path")
+        laptop.fail("systemctl is-failed nixbook-setup-accounts.service")
+        laptop.succeed("userdel -r carol")
 
     with subtest("accounts can run rootless containers"):
         # No generation declares alice, so NixOS itself gives her no
@@ -248,6 +258,33 @@ pkgs.testers.runNixOSTest {
         laptop.succeed("grep -qx 'font-family = JetBrainsMono Nerd Font' /home/alice/.config/ghostty/config")
         laptop.succeed("grep -q 'xdg-config/fontconfig:ro' /var/lib/flatpak/overrides/global")
 
+    with subtest("fingerprint only for login and the lock screen"):
+        laptop.succeed("grep -q pam_fprintd /etc/pam.d/gdm-fingerprint")
+        for svc in ["sudo", "su", "polkit-1", "systemd-run0", "passwd", "useradd", "other"]:
+            laptop.succeed(f"test -f /etc/pam.d/{svc} && ! grep -q pam_fprintd /etc/pam.d/{svc}")
+
+    with subtest("DHCPv6 identity differs per network"):
+        # What NetworkManager itself reads, not just the file
+        conf = laptop.succeed("NetworkManager --print-config")
+        print(conf)
+        assert "ipv6.dhcp-duid=stable-uuid" in conf, conf
+        # Wi-Fi only: NetworkManager leaves every wired port alone
+        assert "unmanaged-devices=type:ethernet" in conf, conf
+
+    with subtest("firmware updates, reboot reminder, container image cleanup"):
+        # No updatable devices in this VM: the check runs and stays quiet
+        laptop.succeed("systemctl start nixbook-firmware-check.service")
+        laptop.succeed("test ! -e /var/lib/nixbook-upgrade/firmware-notified")
+        tile = laptop.succeed("readlink -f $(command -v nixbook-update)").strip()
+        fw = laptop.succeed(f"grep -o '/nix/store/[a-z0-9]*-nixbook-firmware-update' {tile} | head -1").strip()
+        laptop.succeed(f"grep -q -- '--no-unreported-check' {fw}")
+        # Running the update script itself: nothing to update counts as success
+        laptop.succeed(fw)
+        # Booted system is the newest: no reminder, no error
+        laptop.succeed("systemctl start nixbook-reboot-reminder.service")
+        laptop.succeed("test -f /etc/systemd/user/nixbook-podman-prune.service")
+        laptop.succeed("runuser -u alice -- podman image prune --force")
+
     with subtest("security"):
         laptop.succeed("cat /sys/kernel/security/lsm | grep -q apparmor")
         laptop.succeed("nft list ruleset | grep -q 'chain input'")
@@ -266,9 +303,11 @@ pkgs.testers.runNixOSTest {
         laptop.fail("command -v gnome-text-editor")
         laptop.succeed("systemctl is-active nordvpnd.socket")
         # Browser policies must be real files: Flatpak sandboxes can't see /nix/store
-        for p in ["/etc/brave/policies/managed/nixbook.json",
-                  "/var/lib/flatpak/extension/org.mozilla.firefox.systemconfig/x86_64/stable/policies/policies.json"]:
-            laptop.succeed(f"test -f {p} && ! test -L {p} && grep -q : {p}")
+        p = "/etc/brave/policies/managed/nixbook.json"
+        laptop.succeed(f"test -f {p} && ! test -L {p} && grep -q : {p}")
+        laptop.succeed(f"grep -q '\"BraveAIChatEnabled\":false' {p}")
+        # British English is there to pick in Settings
+        laptop.succeed("locale -a | grep -qi '^en_GB.utf-\\?8$'")
 
     with subtest("gradia-capture installs in the graphical user's home"):
         # The VM has no internet, so the clone itself is not run here. The
@@ -320,6 +359,27 @@ pkgs.testers.runNixOSTest {
         laptop.succeed("test -f /etc/nixos/flake.nix -a -f /etc/nixos/flake.lock")
         laptop.fail("test -e /etc/nixos/hosts/elitebook/user.json")
 
+    with subtest("time zone: Amsterdam to start with, the user's choice after that"):
+        def zone():
+            # timedated keeps the zone in memory while it runs; make it read
+            # /etc/localtime again, and check the link itself as well
+            laptop.succeed("systemctl stop systemd-timedated.service")
+            link = laptop.succeed("readlink /etc/localtime").strip()
+            live = laptop.succeed("timedatectl show -p Timezone --value").strip()
+            assert link.endswith("/" + live), (link, live)
+            return live
+
+        assert zone() == "Europe/Amsterdam", zone()
+        # What Settings > Date & Time does
+        laptop.succeed("timedatectl set-timezone Europe/London")
+        assert zone() == "Europe/London", zone()
+        # A rebuild keeps the chosen zone
+        laptop.succeed("/run/current-system/activate")
+        assert zone() == "Europe/London", zone()
+        # Without a zone (fresh install, older laptops) it is Amsterdam again
+        laptop.succeed("rm /etc/localtime && /run/current-system/activate")
+        assert zone() == "Europe/Amsterdam", zone()
+
     with subtest("random Windows-style hostname from the installer"):
         host = laptop.succeed("hostname").strip()
         print(host)
@@ -336,6 +396,9 @@ pkgs.testers.runNixOSTest {
 
     with subtest("report"):
         print(laptop.succeed("systemctl --failed --no-legend || true"))
+        # Only the Flathub install may fail here: this VM has no internet
+        failed = set(laptop.succeed("systemctl --failed --plain --no-legend | awk '{print $1}'").split())
+        assert failed <= {"flatpak-managed-install.service"}, failed
         print(laptop.succeed("systemd-analyze || true"))
         print(laptop.succeed("systemd-analyze blame | head -15 || true"))
         laptop.shutdown()

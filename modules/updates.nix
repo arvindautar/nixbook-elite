@@ -3,8 +3,16 @@
 #    laptop is on AC: update flake inputs in /etc/nixos, commit the lock, build
 #    the new system in the background. It becomes active on the next reboot.
 #  - every 4 hours: Flatpak updates, with a restart prompt for updated apps that are open
+#  - firmware (BIOS, SSD, ...) from LVFS: a notice when there is an update, installed
+#    by the update tiles and applied on the next start
+#  - a reminder when an installed update waits for a restart for 3+ days
 #  - garbage collection scaled to free disk space (nixbook channel.sh)
-{ pkgs, lib, ... }:
+{
+  config,
+  pkgs,
+  lib,
+  ...
+}:
 
 let
   flakeDir = "/etc/nixos";
@@ -164,6 +172,50 @@ let
     done
   '';
 
+  fwupdmgr = "${config.services.fwupd.package}/bin/fwupdmgr";
+
+  # Installs what LVFS has for this laptop; a BIOS update is staged and runs on
+  # the next start. --no-unreported-check: never offer to upload a report
+  # about this laptop. Exit code 2 means there was nothing to update.
+  firmwareUpdate = pkgs.writeShellScript "nixbook-firmware-update" ''
+    ${fwupdmgr} refresh >/dev/null 2>&1 || true
+    rc=0
+    ${fwupdmgr} update --assume-yes --no-reboot-check --no-unreported-check || rc=$?
+    [ "$rc" = 0 ] || [ "$rc" = 2 ]
+  '';
+
+  # Daily, after fwupd-refresh fetched the LVFS metadata. Tells each user once
+  # per new set of updates. fwupdmgr also exits 0 with an empty list, so the
+  # releases in its JSON decide, not its exit code.
+  firmwareCheck = pkgs.writeShellScript "nixbook-firmware-check" ''
+    set -eu
+    stamp=/var/lib/nixbook-upgrade/firmware-notified
+    json=$(${fwupdmgr} get-updates --json --no-unreported-check 2>/dev/null) || true
+    updates=$(printf '%s' "$json" |
+      ${pkgs.jq}/bin/jq -r '.Devices[]? | .Name as $n | .Releases[]? | "\($n) \(.Version)"' 2>/dev/null |
+      sort -u) || updates=
+    if [ -z "$updates" ]; then
+      rm -f "$stamp"
+      exit 0
+    fi
+    [ "$(cat "$stamp" 2>/dev/null)" != "$updates" ] || exit 0
+    ${notifyUsers} "Firmware-update beschikbaar" "$(printf '%s\n' "$updates" | head -3)
+    Sluit de lader aan en kies 'Bijwerken en herstarten' in het app-overzicht."
+    mkdir -p "$(dirname "$stamp")"
+    printf '%s\n' "$updates" > "$stamp"
+  '';
+
+  # The background update only takes effect after a restart (nixos-rebuild boot)
+  rebootReminder = pkgs.writeShellScript "nixbook-reboot-reminder" ''
+    set -eu
+    booted=$(readlink -f /run/booted-system)
+    latest=$(readlink -f /nix/var/nix/profiles/system)
+    [ "$booted" != "$latest" ] || exit 0
+    age=$(( $(date +%s) - $(stat -c %Y /nix/var/nix/profiles/system) ))
+    [ "$age" -ge $((3 * 86400)) ] || exit 0
+    ${notifyUsers} "Herstart nodig" "Er staat al $((age / 86400)) dagen een update klaar. Herstart om de beveiligingsupdates te gebruiken."
+  '';
+
   # Manual "update now" for the app grid (nixbook update.sh / update_shutdown.sh)
   updateNow = pkgs.writeShellScriptBin "nixbook-update" ''
     action="''${1:-reboot}"
@@ -173,6 +225,8 @@ let
       [jJyY]*)
         sudo ${upgrade} || { echo "Update mislukt. Druk op Enter."; read -r; exit 1; }
         flatpak update -y --noninteractive
+        echo "Firmware bijwerken (BIOS en apparaten, via LVFS)..."
+        sudo ${firmwareUpdate} || { echo "Firmware-update mislukt; het systeem is wel bijgewerkt. Druk op Enter."; read -r; }
         systemctl "$action"
         ;;
       *) echo "Update geannuleerd." ;;
@@ -237,6 +291,40 @@ in
       ];
       Persistent = true;
       RandomizedDelaySec = "20min";
+    };
+  };
+
+  systemd.services.nixbook-firmware-check = {
+    description = "Tell users about firmware updates from LVFS";
+    after = [ "fwupd-refresh.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = firmwareCheck;
+      StandardInput = "null";
+    };
+  };
+  systemd.timers.nixbook-firmware-check = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnCalendar = "*-*-* 11:00:00";
+      Persistent = true;
+      RandomizedDelaySec = "1h";
+    };
+  };
+
+  systemd.services.nixbook-reboot-reminder = {
+    description = "Remind users to restart for an installed update";
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = rebootReminder;
+    };
+  };
+  systemd.timers.nixbook-reboot-reminder = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnCalendar = "*-*-* 10:00:00";
+      Persistent = true;
+      RandomizedDelaySec = "30min";
     };
   };
 

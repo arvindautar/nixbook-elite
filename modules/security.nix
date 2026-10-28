@@ -100,6 +100,35 @@
     wheelNeedsPassword = true;
   };
   security.polkit.enable = true;
+  # The fingerprint reader (fprintd) unlocks the login and lock screen only.
+  # NixOS would also accept it for these, so admin rights, accounts and
+  # passwords keep asking for the password.
+  security.pam.services =
+    lib.genAttrs
+      [
+        "sudo"
+        "su"
+        "polkit-1"
+        "systemd-run0"
+        "runuser"
+        "runuser-l"
+        "passwd"
+        "chpasswd"
+        "chfn"
+        "chsh"
+        "useradd"
+        "userdel"
+        "usermod"
+        "groupadd"
+        "groupdel"
+        "groupmems"
+        "groupmod"
+        "cups"
+        "other"
+      ]
+      (_: {
+        fprintAuth = false;
+      });
 
   # Thunderbolt devices must be authorised (GNOME asks)
   services.hardware.bolt.enable = true;

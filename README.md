@@ -26,12 +26,14 @@ privacy-first default setup.
 
 **Desktop.** GNOME without the bundled apps. Ghostty, Nautilus,
 VS Code (FHS variant) and Bazaar are installed; everything else comes from
-Flathub. Installed on the first boot with internet: Brave, Firefox, LibreWolf,
+Flathub. Installed on the first boot with internet: Brave, LibreWolf,
 ONLYOFFICE, Papers (PDF), Loupe (images), Cine (video), Decibels (audio),
 Pinta, Gradia (screenshots, with its Gradia Capture shell extension),
 Calculator, Smile (emoji), Extension Manager and Flatseal. Dash to Dock,
-Blur my Shell and AppIndicator are enabled. Dutch UI and formats, US keyboard
-with € on AltGr+5, spell checking for Dutch and British English.
+Blur my Shell and AppIndicator are enabled. Dutch UI and formats (British
+English available in Settings), US keyboard with € on AltGr+5, spell checking for Dutch
+and British English. The time zone starts as Amsterdam; change it in Settings →
+Date & Time when you travel.
 
 **Security.**
 - Secure Boot with your own keys through [lanzaboote](https://github.com/nix-community/lanzaboote), generated and enrolled automatically (Microsoft keys kept for option ROMs and firmware).
@@ -39,22 +41,26 @@ with € on AltGr+5, spell checking for Dutch and British English.
 - AppArmor; an nftables firewall that drops all inbound traffic and ignores pings.
 - Kernel hardening with negligible cost (`init_on_alloc`, `slab_nomerge`, kptr/dmesg/BPF/ptrace restrictions, no kexec, IOMMU for Thunderbolt DMA), and unused network protocols and filesystems blacklisted.
 - Root is locked, there is no SSH, sudo is for `wheel` only, Thunderbolt devices need approval, and core dumps are off.
+- The fingerprint reader unlocks the login and lock screen only; sudo, admin prompts and password changes always ask for the password.
+- Brave and LibreWolf only see your Downloads folder, not your whole home folder.
 
 **Privacy.**
-- A different random MAC address per Wi-Fi network (stable on that network), a stable random MAC on Ethernet, and no hostname in DHCP.
+- Wi-Fi only: wired network ports (also a monitor's or dock's port over USB-C, and USB tethering) are never used. Remove `unmanaged` in `privacy.nix` to use a cable.
+- A different random MAC address per Wi-Fi network (stable on that network), no hostname in DHCP, and a DHCPv6 identity that differs per network.
 - A random Windows-style hostname per laptop (`DESKTOP-XXXXXXX`).
 - IPv6 privacy addresses; no LLMNR, no network connectivity checks, and no fallback DNS to Google or Cloudflare.
-- Telemetry off in GNOME, location services off, and the laptop is never announced on the network.
-- Brave and Firefox get locked policies: no telemetry or usage pings, no Brave Rewards, Wallet, VPN or News, and no page preloading. Safe Browsing, Tor windows, Leo, Translate and Sync stay available.
+- Telemetry off in GNOME, location services off, no first-login wizard that could turn them back on, and the laptop is never announced on the network.
+- Brave gets locked policies: no telemetry or usage pings, no Brave Rewards, Wallet, VPN, News or Leo (AI), and no page preloading, which makes it close to Brave Origin while keeping the Flatpak's fast updates and sandbox. Safe Browsing, Tor windows, Translate and Sync stay available. LibreWolf is Firefox without telemetry, studies or captive-portal pings, with uBlock Origin built in.
 - ONLYOFFICE, which opens other people's documents and is online, only sees Documents, Downloads and Desktop.
-- NordVPN daemon, CLI and GUI included (`nordvpn login`).
+- NordVPN daemon, CLI and GUI included (`nordvpn login`); you set it up yourself in the app.
 
 **Performance.**
 - 6.18 LTS kernel; zram swap in RAM (zstd, 50%) instead of swap on the SSD, with ChromeOS/Fedora-style VM tuning.
 - systemd-oomd stops runaway programs before the desktop freezes, and Nix builds run at idle CPU and I/O priority.
 - btrfs with zstd:1 compression and async discard, plus monthly scrub and fstrim.
 - Smaller writeback bursts for the DRAM-less KIOXIA SSD.
-- Hardware video decoding (iHD), panel self refresh, PCI runtime power management and power-profiles-daemon.
+- Hardware video decoding (iHD), panel self refresh (PSR2), PCI runtime power management and power-profiles-daemon; i915, NVMe and audio power saving stay at the kernel's defaults, which are the deepest for this hardware.
+- The Nix store is deduplicated weekly instead of during every build.
 - Silent boot with Plymouth.
 
 **Updates.**
@@ -63,7 +69,9 @@ with € on AltGr+5, spell checking for Dutch and British English.
 - A failed build reverts the lock and shows a notification.
 - Flatpaks, including those installed with Bazaar, update every 4 hours. When an app you have open was updated, a notification asks you to restart it.
 - Old generations are garbage-collected based on free disk space.
-- Two app-grid tiles do it right away: *Bijwerken en herstarten* (update and reboot) and *Bijwerken en afsluiten* (update and shut down).
+- Two app-grid tiles do it right away: *Bijwerken en herstarten* (update and reboot) and *Bijwerken en afsluiten* (update and shut down). They also install firmware updates (BIOS, SSD and more) from LVFS, which HP publishes there; a BIOS update runs on the next start.
+- A notification says when LVFS has a firmware update for this laptop, and when an installed update has waited 3+ days for a restart.
+- Unused container image layers in each account are removed weekly.
 
 **Backups.**
 - Daily read-only btrfs snapshots of `/` (7 kept) and `/home` (14 kept) in `/.snapshots`.
@@ -126,7 +134,7 @@ with Nix (flakes enabled) to build the ISO.
 
 | Command | What it does |
 |---|---|
-| `nixbook-update [reboot\|poweroff]` | Update now, then reboot or shut down (also the two app-grid tiles) |
+| `nixbook-update [reboot\|poweroff]` | Update the system, apps and firmware now, then reboot or shut down (also the two app-grid tiles) |
 | `nixbook-secureboot` | Whose Secure Boot keys the firmware holds and what to do next |
 | `sudo nixbook-enroll` | Enroll the keys by hand (firmware must be in Setup Mode) |
 | `sudo nixbook-backup-recovery DIR` | Copy Secure Boot keys + LUKS header backup to `DIR` |
@@ -153,7 +161,7 @@ modules/
   fonts.nix                Liberation Sans/Serif and JetBrainsMono Nerd Font, as on Omarchy
   accounts.nix             groups and container IDs for every account
   boot.nix                 lanzaboote Secure Boot, kernel, silent boot
-  desktop.nix              GNOME, apps, Brave/Firefox policies, defaults
+  desktop.nix              GNOME, apps, Brave policies, defaults
   flatpak.nix              Flathub apps and overrides, Gradia Capture
   security.nix, privacy.nix, performance.nix, power.nix
   updates.nix              automatic updates, garbage collection
@@ -199,6 +207,27 @@ It takes about 4 minutes once everything is built.
 
 Other hardware: the disk (`/dev/nvme0n1`), `hardware.nix` and the HP-specific
 Secure Boot hints are EliteBook-specific; the rest is generic NixOS.
+
+### Maintenance: lanzaboote and disko
+
+The automatic updates move nixpkgs, nixos-unstable and nix-flatpak every week.
+lanzaboote and disko are pinned to a release tag in `flake.nix` on purpose,
+so they never move by themselves: lanzaboote signs what the laptop boots, and
+an untested change there can leave it unable to start.
+
+A few times a year, check the
+[lanzaboote releases](https://github.com/nix-community/lanzaboote/releases)
+(security fixes) and the
+[disko releases](https://github.com/nix-community/disko/releases). To move to
+a new release, on the laptop in `/etc/nixos`:
+
+1. Change the tag in `flake.nix`, e.g. `github:nix-community/lanzaboote/v1.3.0`.
+2. `sudo nix flake update lanzaboote --flake /etc/nixos` (or `disko`).
+3. Optional, takes a while: `nix build /etc/nixos#checks.x86_64-linux.install -L`.
+4. `sudo nixos-rebuild boot --flake /etc/nixos#nixbook` and restart. If the laptop
+   does not start, hold Space at power-on and pick the previous entry.
+
+disko only runs during installation, so its version matters for new installs only.
 
 ## Known limits
 
