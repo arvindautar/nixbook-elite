@@ -1,5 +1,4 @@
-# Shared GNOME extensions. Gradia Capture is installed only in the logged-in
-# user's home by the user service in flatpak.nix.
+# GNOME extensions for all users. Gradia Capture is per user, see flatpak.nix.
 { pkgs-unstable, ... }:
 
 {

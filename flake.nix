@@ -2,9 +2,9 @@
   description = "nixbook-elite: a Chromebook-like, secure and private NixOS for the HP EliteBook 840 G10";
 
   inputs = {
-    # Stable base (NixOS 26.05) with the 6.18 LTS kernel
+    # NixOS 26.05, 6.18 LTS kernel
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
-    # Only used for fast moving tools: AI CLIs, Bazaar, NordVPN and GNOME extensions
+    # only for things that move fast: AI CLIs, Bazaar, NordVPN, GNOME extensions
     nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     lanzaboote = {

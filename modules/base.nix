@@ -1,4 +1,4 @@
-# Nix, locale and the basics (adapted from nixbook common.nix)
+# Nix, locale and other basics (based on nixbook's common.nix)
 {
   pkgs,
   ...
@@ -13,30 +13,29 @@
         "nix-command"
         "flakes"
       ];
-      # Only admins may talk to the nix daemon
+      # only admins can talk to the nix daemon
       allowed-users = [ "@wheel" ];
       trusted-users = [ "root" ];
       max-jobs = "auto";
       download-buffer-size = 268435456;
     };
-    # Deduplicate the store weekly, not during every build
+    # dedupe weekly instead of on every build
     optimise.automatic = true;
-    # Builds and updates never make the desktop stutter
+    # keep builds from making the desktop stutter
     daemonCPUSchedPolicy = "idle";
     daemonIOSchedClass = "idle";
-    # Flake-only system: no channels, NIX_PATH points at the pinned nixpkgs
+    # flakes only, NIX_PATH points at the pinned nixpkgs
     channel.enable = false;
   };
-  # Builds go to disk, not to the RAM-backed /tmp
+  # don't build in the RAM backed /tmp
   systemd.services.nix-daemon.environment.TMPDIR = "/var/tmp";
 
-  # Dutch UI and formats, US keyboard with € on AltGr+5
-  # The time zone is the user's: Amsterdam to start with, changeable in
-  # Settings > Date & Time (by hand; location services stay off).
+  # Dutch UI and formats, US keyboard with € on AltGr+5.
+  # No time zone here so it can be changed in Settings.
   time.timeZone = null;
-  # A fresh install has no /etc/localtime yet. Laptops installed while the
-  # flake fixed the zone lose NixOS's link on their first rebuild. Both get
-  # Amsterdam; a zone chosen in Settings is left alone.
+  # Default to Amsterdam when no zone is set: fresh installs, and laptops
+  # installed when the flake still set the zone (NixOS removes its link on the
+  # first rebuild).
   system.activationScripts.nixbookTimeZone = {
     deps = [ "etc" ];
     text = ''
@@ -53,7 +52,7 @@
   };
   console.keyMap = "us";
 
-  # Printing with driverless (IPP Everywhere) printers, like nixbook
+  # driverless (IPP Everywhere) printing, like nixbook
   services.printing = {
     enable = true;
     browsed.enable = false;
@@ -61,7 +60,7 @@
   services.avahi = {
     enable = true;
     nssmdns4 = true;
-    # Find printers, but never announce this laptop on the network
+    # discover printers, but don't announce ourselves
     publish.enable = false;
     openFirewall = true;
   };
@@ -84,13 +83,13 @@
     info.enable = false;
   };
 
-  # Logs: persistent but bounded
+  # persistent logs, but capped
   services.journald.extraConfig = ''
     SystemMaxUse=300M
     MaxRetentionSec=1month
   '';
 
-  # Fast boot: don't block on the network
+  # don't block boot on the network
   systemd.services.NetworkManager-wait-online.enable = false;
   networking.networkmanager.enable = true;
 }

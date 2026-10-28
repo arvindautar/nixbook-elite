@@ -1,11 +1,11 @@
-# Secure Boot (lanzaboote), LTS kernel, systemd initrd and a silent boot
+# Secure Boot (lanzaboote), LTS kernel, systemd initrd, quiet boot
 { pkgs, lib, ... }:
 
 let
-  # `nixbook-secureboot` shows whose keys the firmware holds and what to do next.
-  # HP Sure Start silently restores the factory keys after the boot loader enrolls
-  # its own, so it must be off before enrolling. `nixbook-enroll` is the manual
-  # fallback for the automatic enrollment done by lanzaboote. No disk PIN.
+  # nixbook-secureboot shows whose keys are in the firmware and what to do next.
+  # HP Sure Start puts the factory keys back after enrollment, so it has to be
+  # off first. nixbook-enroll is the manual fallback for lanzaboote's
+  # auto-enrollment.
   enroll = pkgs.writeShellScriptBin "nixbook-enroll" ''
     set -euo pipefail
     [ "$(id -u)" = 0 ] || exec sudo "$0" "$@"
@@ -111,12 +111,12 @@ in
     enroll
   ];
 
-  # Latest LTS kernel (6.18), pinned explicitly so a release bump never switches it
+  # 6.18 LTS, pinned so a nixpkgs bump doesn't switch kernels
   boot.kernelPackages = pkgs.linuxPackages_6_18;
 
-  # Secure Boot with your own keys, fully automatic:
-  #  1st boot: keys are generated, ESP re-signed, auto reboot
-  #  2nd boot: systemd-boot enrolls them (firmware must be in Setup Mode)
+  # Own keys, enrolled automatically. The first boot generates them, re-signs
+  # the ESP and reboots; on the second boot systemd-boot enrolls them (the
+  # firmware has to be in Setup Mode).
   boot.loader.systemd-boot.enable = lib.mkForce false;
   boot.lanzaboote = {
     enable = true;
@@ -126,21 +126,21 @@ in
     autoEnrollKeys = {
       enable = true;
       autoReboot = true;
-      # Keep Microsoft's keys: GPU/Thunderbolt option ROMs and HP firmware need them
+      # option ROMs (GPU, Thunderbolt) and HP firmware are signed by Microsoft
       includeMicrosoftKeys = true;
     };
   };
   boot.loader.efi.canTouchEfiVariables = true;
-  # Chromebook-like: no menu, hold Space to see it
+  # no menu, hold space to get it
   boot.loader.timeout = 0;
 
   boot.initrd.systemd.enable = true;
 
-  # Silent boot (from nixbook common.nix); the LUKS prompt shows in Plymouth
+  # quiet boot (from nixbook's common.nix), LUKS prompt in Plymouth
   boot.plymouth.enable = true;
   boot.consoleLogLevel = lib.mkDefault 0;
   boot.initrd.verbose = false;
-  # Plymouth adds "splash" and consoleLogLevel adds "loglevel=0"
+  # plymouth adds "splash", consoleLogLevel adds "loglevel=0"
   boot.kernelParams = [
     "quiet"
     "rd.systemd.show_status=false"

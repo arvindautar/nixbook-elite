@@ -1,6 +1,5 @@
-# Hardware profile written from the hardware report, so the system can be
-# built (and put on the ISO) before installation. File systems come from
-# disko.nix and are referenced by label, never by UUID.
+# Written from the hardware report so the system can be built (and put on
+# the ISO) before installing. Filesystems come from disko.nix, by label.
 { lib, pkgs, ... }:
 
 {
@@ -17,7 +16,7 @@
   hardware.cpu.intel.updateMicrocode = true;
   hardware.enableRedistributableFirmware = true; # iwlwifi AX211, SOF audio, i915 GuC/HuC
 
-  # Raptor Lake Iris Xe: hardware video decode/encode saves a lot of battery
+  # Iris Xe video decode/encode, saves a lot of battery
   hardware.graphics = {
     enable = true;
     extraPackages = with pkgs; [
@@ -26,23 +25,23 @@
     ];
   };
   environment.sessionVariables.LIBVA_DRIVER_NAME = "iHD";
-  # GuC submission and HuC are already the i915 default on Raptor Lake
+  # GuC submission and HuC are already on by default on Raptor Lake
 
-  # Synaptics 06cb:00f0 fingerprint reader (enroll in GNOME Settings, optional)
+  # Synaptics 06cb:00f0, enroll in GNOME Settings
   services.fprintd.enable = true;
 
-  # AX211 Bluetooth: available, but off until you switch it on
+  # off at boot
   hardware.bluetooth = {
     enable = true;
     powerOnBoot = false;
   };
 
-  # Intel eSIM (no profiles). NetworkManager would otherwise start ModemManager
-  # and probe it on every boot. Remove both lines to use cellular later.
+  # Intel eSIM without profiles. Otherwise NM starts ModemManager and probes it
+  # on every boot. Remove both to use cellular.
   networking.modemmanager.enable = false;
   boot.blacklistedKernelModules = [ "iosm" ];
 
-  # HP firmware updates through LVFS (where HP publishes them)
+  # HP publishes its firmware on LVFS
   services.fwupd.enable = true;
 
   nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";

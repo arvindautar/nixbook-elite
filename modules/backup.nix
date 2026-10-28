@@ -1,6 +1,5 @@
-# Local btrfs snapshots, plus a restic copy of /home when a disk labeled
-# NIXBACKUP is plugged in. Snapshots live on the same SSD, so they survive
-# a bad edit and not a dead disk. The restic copy is the other copy.
+# btrfs snapshots on the SSD itself (for undo, not for a dead disk), and
+# restic to a disk labeled NIXBACKUP whenever one is plugged in.
 { pkgs, ... }:
 
 let
@@ -11,7 +10,7 @@ let
     chmod 700 /.snapshots
     ${pkgs.btrfs-progs}/bin/btrfs subvolume snapshot -r /home "/.snapshots/home-$stamp"
     ${pkgs.btrfs-progs}/bin/btrfs subvolume snapshot -r / "/.snapshots/root-$stamp"
-    # Nested subvolumes are not part of the snapshot, so this does not recurse.
+    # nested subvolumes aren't included, so no recursion
     cd /.snapshots
     ls -1d home-* 2>/dev/null | sort | head -n -14 | while read -r old; do
       ${pkgs.btrfs-progs}/bin/btrfs subvolume delete "/.snapshots/$old"
@@ -94,7 +93,7 @@ in
     };
   };
 
-  # Quiet when the disk is absent. Plugging in NIXBACKUP is enough.
+  # does nothing when the disk isn't there
   systemd.services.nixbook-backup-home = {
     description = "restic backup of /home to a disk labeled NIXBACKUP";
     path = [

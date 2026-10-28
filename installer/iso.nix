@@ -1,5 +1,5 @@
-# USB installer: boots the stock NixOS minimal ISO environment and carries the
-# complete, prebuilt nixbook system, so installation works without internet.
+# Installer ISO: stock minimal NixOS with the prebuilt nixbook system on it,
+# so no internet is needed.
 {
   modulesPath,
   pkgs,

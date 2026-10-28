@@ -1,12 +1,9 @@
-# Chromebook-style updates (adapted from nixbook base.nix):
-#  - a few times a day, but only when the last success is 6+ days old and the
-#    laptop is on AC: update flake inputs in /etc/nixos, commit the lock, build
-#    the new system in the background. It becomes active on the next reboot.
-#  - every 4 hours: Flatpak updates, with a restart prompt for updated apps that are open
-#  - firmware (BIOS, SSD, ...) from LVFS: a notice when there is an update, installed
-#    by the update tiles and applied on the next start
-#  - a reminder when an installed update waits for a restart for 3+ days
-#  - garbage collection scaled to free disk space (nixbook channel.sh)
+# Automatic updates, roughly like nixbook's:
+# - system: flake update + `nixos-rebuild boot`, at most every 6 days, only on AC
+# - flatpaks every 4 hours
+# - firmware from LVFS, installed by the update tiles
+# - reboot reminder after 3 days
+# - gc based on free disk space (nixbook's channel.sh)
 {
   config,
   pkgs,
@@ -42,11 +39,11 @@ let
 
   stampFile = "/var/lib/nixbook-upgrade/last-success";
 
-  # Usage: nixbook-upgrade [--if-due]
-  #  --if-due (timer): skip when the last successful update is less than 6 days old,
-  #  and when offline (tried again the next day instead of failing).
+  # nixbook-upgrade [--if-due]
+  # --if-due is what the timer uses: do nothing if the last update is less
+  # than 6 days old, or we're on battery or offline.
   upgrade = pkgs.writeShellScript "nixbook-upgrade" ''
-    # -E: the ERR trap below must also fire for failures inside functions
+    # -E so the ERR trap also fires inside functions
     set -Eeu
     export PATH=${
       lib.makeBinPath [
@@ -59,7 +56,7 @@ let
       ]
     }:$PATH
 
-    # /sys/class/power_supply/*/online is 1 on mains. No mains device means a desktop.
+    # online is 1 on mains. No power supply at all means a desktop.
     on_ac() {
       local f online=0 seen=0
       for f in /sys/class/power_supply/*/online; do
@@ -91,7 +88,7 @@ let
       fi
     }
 
-    # A failed build must not leave the new lock as the only copy.
+    # if the build fails, put the old lock back
     lock_committed=0
     rollback_lock() {
       if [ "$lock_committed" = 1 ]; then
@@ -111,7 +108,7 @@ let
         echo "On battery, trying again later."
         exit 0
       fi
-      # NetworkManager-wait-online is off, so wait here for up to 5 minutes
+      # NetworkManager-wait-online is disabled, so wait up to 5 min ourselves
       online=0
       for _ in $(seq 30); do
         if curl -fsS --max-time 10 -o /dev/null https://github.com; then online=1; break; fi
@@ -141,14 +138,13 @@ let
     ${notifyUsers} "Updates klaar" "Herstart wanneer het je uitkomt om de updates te gebruiken."
   '';
 
-  # All Flatpak apps, including those installed with Bazaar (nix-flatpak only updates its own)
+  # nix-flatpak only updates its own apps, this also covers Bazaar installs
   flatpakUpdate = scope: ''
     ${pkgs.flatpak}/bin/flatpak update ${scope} -y --noninteractive
     ${pkgs.flatpak}/bin/flatpak uninstall ${scope} --unused -y --noninteractive
   '';
 
-  # A running app keeps using the old version until it is restarted. After an
-  # update, ask each user to restart the updated apps they have open.
+  # Running apps keep the old version until restarted, so tell the user.
   flatpakSystemUpdate = ''
     apps() { ${pkgs.flatpak}/bin/flatpak list --system --app --columns=application,active,name | sort; }
     before=$(apps)
@@ -174,9 +170,9 @@ let
 
   fwupdmgr = "${config.services.fwupd.package}/bin/fwupdmgr";
 
-  # Installs what LVFS has for this laptop; a BIOS update is staged and runs on
-  # the next start. --no-unreported-check: never offer to upload a report
-  # about this laptop. Exit code 2 means there was nothing to update.
+  # BIOS updates get staged and applied on the next boot.
+  # --no-unreported-check so fwupdmgr never asks to upload a report.
+  # Exit code 2 means nothing to do.
   firmwareUpdate = pkgs.writeShellScript "nixbook-firmware-update" ''
     ${fwupdmgr} refresh >/dev/null 2>&1 || true
     rc=0
@@ -184,9 +180,8 @@ let
     [ "$rc" = 0 ] || [ "$rc" = 2 ]
   '';
 
-  # Daily, after fwupd-refresh fetched the LVFS metadata. Tells each user once
-  # per new set of updates. fwupdmgr also exits 0 with an empty list, so the
-  # releases in its JSON decide, not its exit code.
+  # Runs after fwupd-refresh. get-updates also exits 0 with an empty list
+  # (fwupd 2.1.4), so count the releases instead. Notify once per set.
   firmwareCheck = pkgs.writeShellScript "nixbook-firmware-check" ''
     set -eu
     stamp=/var/lib/nixbook-upgrade/firmware-notified
@@ -205,7 +200,7 @@ let
     printf '%s\n' "$updates" > "$stamp"
   '';
 
-  # The background update only takes effect after a restart (nixos-rebuild boot)
+  # `nixos-rebuild boot` needs a reboot to take effect
   rebootReminder = pkgs.writeShellScript "nixbook-reboot-reminder" ''
     set -eu
     booted=$(readlink -f /run/booted-system)
@@ -216,7 +211,7 @@ let
     ${notifyUsers} "Herstart nodig" "Er staat al $((age / 86400)) dagen een update klaar. Herstart om de beveiligingsupdates te gebruiken."
   '';
 
-  # Manual "update now" for the app grid (nixbook update.sh / update_shutdown.sh)
+  # "update now" tiles, like nixbook's update.sh / update_shutdown.sh
   updateNow = pkgs.writeShellScriptBin "nixbook-update" ''
     action="''${1:-reboot}"
     echo "Dit werkt je systeem bij en voert daarna '$action' uit."
@@ -233,8 +228,7 @@ let
     esac
   '';
 
-  # Adwaita 50 has no system-software-update icon, so the app grid showed a
-  # blank tile. These are the reboot and power symbols on their own tiles.
+  # Adwaita 50 has no system-software-update icon anymore, ship our own
   desktopItem =
     name: desktopName: action: iconFile:
     pkgs.symlinkJoin {
@@ -262,8 +256,7 @@ let
     };
 in
 {
-  # Several times a day. The script returns without touching the stamp while the
-  # last success is under 6 days old, the laptop is on battery, or GitHub is unreachable.
+  # Cheap to run often, the script exits early when no update is due.
   systemd.services.nixbook-upgrade = {
     description = "Update NixOS (applied on next boot)";
     serviceConfig = {
@@ -277,9 +270,7 @@ in
     wants = [ "network-online.target" ];
   };
 
-  # Several chances per day. The script itself returns immediately on battery
-  # or when the last success is under 6 days old, without moving the stamp,
-  # so a missed lunch slot is picked up the next time the laptop is plugged in.
+  # Several slots so a missed one gets picked up the next time we're on AC.
   systemd.timers.nixbook-upgrade = {
     wantedBy = [ "timers.target" ];
     timerConfig = {
@@ -346,8 +337,8 @@ in
     ];
     wants = [ "network-online.target" ];
   };
-  # Every 4 hours: browser security fixes land on Flathub within hours, and a
-  # check with nothing new only fetches the small repo summary.
+  # Browser fixes hit Flathub within hours. When nothing changed this only
+  # fetches the repo summary.
   systemd.timers.nixbook-flatpak-update = {
     wantedBy = [ "timers.target" ];
     timerConfig = {
@@ -358,7 +349,7 @@ in
     };
   };
 
-  # Apps installed per user (`flatpak --user`); a no-op when there are none
+  # `flatpak --user` installs, usually there are none
   systemd.user.services.nixbook-flatpak-update = {
     description = "Update Flatpak apps installed for this user";
     serviceConfig.Type = "oneshot";

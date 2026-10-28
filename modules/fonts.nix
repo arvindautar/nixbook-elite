@@ -1,13 +1,11 @@
-# Fonts as on Omarchy: Liberation Sans and Serif (metric-compatible with Arial
-# and Times New Roman, so documents keep their layout) and JetBrainsMono Nerd
-# Font. GNOME's own interface font stays Adwaita Sans. Helvetica, Palatino and
-# the other PostScript fonts get TeX Gyre (GNOME's default fonts), the
-# TrueType successor of the URW fonts Omarchy uses for them.
+# Same fonts as Omarchy: Liberation Sans/Serif (metric compatible with Arial
+# and Times New Roman) and JetBrainsMono Nerd Font. The UI font stays Adwaita
+# Sans. Helvetica & co. resolve to TeX Gyre, which GNOME already pulls in.
 { pkgs, ... }:
 
 let
-  # Omarchy's 50-omarchy.conf. A strong assign, so a page or app asking for
-  # sans-serif, serif or monospace always gets these, also inside Flatpaks.
+  # From Omarchy's 50-omarchy.conf. Strong binding so the generic names always
+  # map to these, flatpaks included.
   fontconfig = ''
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
@@ -36,15 +34,15 @@ in
 {
   fonts = {
     packages = with pkgs; [
-      # fontconfig's metric aliases then give Arial, Times New Roman and
-      # Courier New these Liberation fonts
+      # Arial, Times New Roman and Courier New map to these through
+      # 30-metric-aliases.conf
       liberation_ttf
       nerd-fonts.jetbrains-mono
       noto-fonts
       noto-fonts-cjk-sans
       noto-fonts-color-emoji
     ];
-    # Flatpaks see the fonts through /usr/share/fonts
+    # flatpaks pick up fonts from /usr/share/fonts
     fontDir.enable = true;
     fontconfig = {
       defaultFonts = {
@@ -53,16 +51,16 @@ in
         monospace = [ "JetBrainsMono Nerd Font" ];
         emoji = [ "Noto Color Emoji" ];
       };
-      # Same as Omarchy: slight hinting, grayscale antialiasing
+      # same as Omarchy
       hinting.style = "slight";
       subpixel.rgba = "none";
       localConf = fontconfig;
     };
   };
 
-  # Flatpaks don't read /etc/fonts, only ~/.config/fontconfig (read-only).
-  # A real file owned by the account: the sandbox can't follow links into
-  # /nix/store, and tmpfiles' copy keeps root as owner, which a user can't set.
+  # Flatpaks don't read /etc/fonts, only ~/.config/fontconfig. Needs to be a
+  # real file: the sandbox can't follow links into /nix/store, and a tmpfiles
+  # C copy keeps root as owner, which fails as a user.
   systemd.user.services.nixbook-fontconfig = {
     description = "Copy the font settings where Flatpaks read them";
     wantedBy = [ "default.target" ];
@@ -74,13 +72,13 @@ in
     '';
   };
   systemd.user.tmpfiles.rules = [
-    # Ghostty's own default has no Nerd Font icons. Only written when the
-    # account has no Ghostty config yet, so later changes stay.
+    # Ghostty's builtin font has no Nerd Font glyphs. 'f' only writes the file
+    # if it doesn't exist yet.
     "d %h/.config/ghostty - - - -"
     "f %h/.config/ghostty/config - - - - font-family = JetBrainsMono Nerd Font\\n"
   ];
-  # Written at activation, not by nix-flatpak's install job, which only runs
-  # once online. flatpak override merges, so other global overrides stay.
+  # At activation because nix-flatpak only applies overrides once online.
+  # `flatpak override` merges with whatever is already there.
   system.activationScripts.flatpakFontconfig = ''
     ${pkgs.flatpak}/bin/flatpak override --system --filesystem=xdg-config/fontconfig:ro
   '';

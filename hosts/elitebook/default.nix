@@ -25,13 +25,12 @@
     ../../modules/backup.nix
   ];
 
-  # Looks like any Windows PC: says nothing about you, the device or the OS.
-  # The installer picks a random DESKTOP-XXXXXXX per laptop and writes it to
-  # /etc/hostname. With no hostname here, NixOS leaves that file alone.
+  # Random DESKTOP-XXXXXXX hostname, written by the installer. No hostname
+  # here, so NixOS doesn't touch /etc/hostname.
   networking.hostName = "";
 
-  # Laptops installed when user.json held the hostname had /etc/hostname from
-  # NixOS, which removes it now. Keep the name they are running with.
+  # Older installs got /etc/hostname from NixOS (user.json), which now deletes
+  # it on rebuild. Put back the name they're running with.
   system.activationScripts.nixbookHostname = {
     deps = [ "etc" ];
     text = ''

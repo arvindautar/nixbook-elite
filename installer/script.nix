@@ -1,5 +1,5 @@
-# Builds `nixbook-install` for a given target system (real one for the ISO,
-# an instrumented copy for the VM test).
+# Builds nixbook-install for a target system: the real one for the ISO, the
+# instrumented one for the VM test.
 {
   pkgs,
   lib,

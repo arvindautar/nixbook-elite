@@ -1,5 +1,4 @@
-# Automatic partitioning: GPT -> 1 GiB ESP + LUKS2 (argon2id) -> btrfs subvolumes.
-# nvme0n1 is the EliteBook's SSD; the installer formats exactly that disk.
+# GPT on nvme0n1: 1 GiB ESP + LUKS2 (argon2id) with btrfs subvolumes.
 { lib, ... }:
 
 let
@@ -35,7 +34,7 @@ in
           content = {
             type = "luks";
             name = "cryptroot";
-            # Only used while formatting; the installer deletes it afterwards
+            # only used while formatting, the installer removes it
             passwordFile = "/tmp/nixbook-luks.key";
             extraFormatArgs = [
               "--type"
@@ -52,11 +51,11 @@ in
               "NIXCRYPT"
             ];
             settings = {
-              # TRIM through LUKS keeps the DRAM-less BG5 fast; leaks only free-space layout
+              # TRIM through LUKS, the BG5 needs it. Leaks which blocks are free.
               allowDiscards = true;
-              # Skip dm-crypt workqueues: lower latency on NVMe (as used by Cloudflare/Fedora)
+              # skip the dm-crypt workqueues, lower latency on NVMe
               bypassWorkqueues = true;
-              # Unlock stays the long passphrase. No TPM and no PIN.
+              # passphrase only, no TPM or PIN
             };
             content = {
               type = "btrfs";
@@ -82,7 +81,7 @@ in
                   mountpoint = "/var/log";
                   mountOptions = btrfsOpts;
                 };
-                # VM images: no compression/COW fragmentation fights (nodatacow set by tmpfiles)
+                # VM images: no compression, nodatacow is set via tmpfiles
                 "@libvirt" = {
                   mountpoint = "/var/lib/libvirt/images";
                   mountOptions = [

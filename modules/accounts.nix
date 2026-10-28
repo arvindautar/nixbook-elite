@@ -1,7 +1,6 @@
-# Accounts are data, not configuration: the installer makes the first account
-# and GNOME Settings adds more, but none appears in this flake. Everything an
-# account needs (groups, container ID ranges) is given to it by
-# name-independent rules here, so the prebuilt offline system is complete.
+# No accounts in the flake. The installer creates the first one, more can be
+# added in GNOME Settings. Groups and subuid ranges come from the rules below,
+# so the prebuilt system on the ISO doesn't need to know any names.
 {
   config,
   pkgs,
@@ -10,8 +9,8 @@
 }:
 
 let
-  # Admins (wheel) also get these. The installer gives them to the first
-  # account itself; this covers admins made later in GNOME Settings.
+  # extra groups for admins (wheel). The installer already sets these for the
+  # first account, this is for admins added later.
   adminGroups = [
     "networkmanager"
     "libvirtd"
@@ -20,10 +19,10 @@ let
     "audio"
   ];
 
-  # Idempotent; run on every activation and whenever an account is added or
-  # changed. NixOS rewrites /etc/subuid and /etc/subgid from declared users
-  # only, so undeclared accounts get the range NixOS would allocate, recorded
-  # in auto-subuid-map in case a later generation does declare them.
+  # Idempotent, runs on activation and whenever passwd/group change.
+  # NixOS only writes subuid/subgid for declared users, so give the others the
+  # range NixOS would pick and record it in auto-subuid-map, in case a later
+  # generation declares the user after all.
   setupAccounts = pkgs.writeShellScript "nixbook-setup-accounts" ''
     set -eu
     PATH=${
@@ -50,8 +49,7 @@ let
 
         groups=" $(id -nG "$name") "
         if [[ "$groups" == *" wheel "* ]]; then
-          # One usermod for all missing groups: every write to /etc/group
-          # starts this service again through the path unit
+          # single usermod: every write to /etc/group triggers the path unit again
           missing=
           for g in ${lib.concatStringsSep " " adminGroups}; do
             [[ "$groups" == *" $g "* ]] || missing+="''${missing:+,}$g"
@@ -70,15 +68,15 @@ in
     nordvpn = { };
   };
 
-  # No first-login wizard. The installer makes the account and this flake sets
-  # everything it would ask; its privacy page could even turn location back on.
+  # The installer makes the account and everything the wizard asks is set here
+  # already. Its privacy page could also turn location services back on.
   services.gnome.gnome-initial-setup.enable = false;
 
   system.activationScripts.nixbookAccounts = {
     deps = [ "users" ];
     text = "${setupAccounts}";
   };
-  # The installer and GNOME Settings add accounts and admin rights at runtime
+  # accounts can be added at runtime (GNOME Settings)
   systemd.paths.nixbook-setup-accounts = {
     wantedBy = [ "multi-user.target" ];
     pathConfig.PathChanged = [
@@ -88,9 +86,9 @@ in
   };
   systemd.services.nixbook-setup-accounts = {
     description = "Give new accounts their groups and container ID ranges";
-    # Making an account writes /etc/passwd and /etc/group several times, and so
-    # does this service. A second run changes nothing, so no start limit: hitting
-    # it would also stop the path unit until the next boot.
+    # Creating an account writes passwd/group several times and so do we.
+    # Running twice is harmless, but hitting the start limit also kills the
+    # path unit until the next boot.
     unitConfig.StartLimitIntervalSec = 0;
     serviceConfig = {
       Type = "oneshot";
@@ -98,10 +96,10 @@ in
     };
   };
 
-  # Machines installed before accounts moved out of the flake had their user
-  # declared by an earlier generation; NixOS deletes such a user from any later
-  # generation that does not declare it. Refuse that for normal accounts.
-  # A deliberate removal: NIXOS_NO_CHECK=1 nixos-rebuild ...
+  # Laptops installed before accounts moved out of the flake had their user
+  # declared in an older generation. NixOS deletes such users from a generation
+  # that doesn't declare them anymore, so refuse that.
+  # To remove one on purpose: NIXOS_NO_CHECK=1 nixos-rebuild ...
   system.preSwitchChecks.nixbookKeepUsers =
     let
       normalUsers = lib.attrNames (lib.filterAttrs (_: u: u.isNormalUser) config.users.users);

@@ -1,4 +1,4 @@
-# Secure Boot keys and the LUKS header. The disk unlock is the passphrase.
+# Copies the Secure Boot keys and a LUKS header backup off the laptop.
 {
   pkgs,
   ...
@@ -20,12 +20,11 @@ let
     mkdir -p ${store} "$dest"
     chmod 700 ${store} "$dest"
     rm -rf ${store}/sbctl "$dest/sbctl"
-    # A USB stick is usually FAT: it has no owners, and cp -a as root fails
-    # there, so copies to $dest keep only mode and time.
+    # USB sticks are usually FAT, cp -a fails on ownership there
     copy() { cp -r --preserve=mode,timestamps "$@"; }
     cp -a /var/lib/sbctl ${store}/sbctl
     copy /var/lib/sbctl "$dest/sbctl"
-    # luksHeaderBackup refuses to overwrite, and this is meant to be run again
+    # luksHeaderBackup won't overwrite, and this is meant to be rerun
     rm -f ${store}/luks-header.bin
     ${pkgs.cryptsetup}/bin/cryptsetup luksHeaderBackup ${disk} \
       --header-backup-file ${store}/luks-header.bin

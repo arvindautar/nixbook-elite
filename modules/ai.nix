@@ -1,4 +1,4 @@
-# AI coding tools, always from nixos-unstable (updated weekly with the system)
+# AI coding CLIs from unstable, updated with the weekly system update
 { pkgs-unstable, ... }:
 
 {

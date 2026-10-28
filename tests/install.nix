@@ -1,8 +1,7 @@
-# End-to-end install test, fully offline:
-#  1. boot an installer VM with an empty NVMe disk, run `nixbook-install`
-#  2. boot the installed disk with Secure Boot firmware in Setup Mode
-#  3. unlock LUKS, let lanzaboote generate + enroll keys (auto reboot)
-#  4. verify Secure Boot, desktop, security, zram, VPN, AI tools, ...
+# End-to-end install test, offline:
+# install from the ISO onto an empty NVMe disk, boot it with Secure Boot
+# firmware in Setup Mode, let lanzaboote enroll its keys, then check the
+# installed system.
 {
   pkgs,
   lib,
@@ -11,19 +10,19 @@
 }:
 
 let
-  # The real system plus the test backdoor so the driver can run commands in it
+  # the real system plus the test backdoor
   target = nixbook.extendModules {
     modules = [
       (
         { modulesPath, pkgs, ... }:
         {
           imports = [ "${modulesPath}/testing/test-instrumentation.nix" ];
-          # lsattr checks the No_COW flag on the libvirt subvolume.
+          # lsattr, for the No_COW check on the libvirt subvolume
           environment.systemPackages = [ pkgs.e2fsprogs ];
           boot.initrd.availableKernelModules = [ "virtio_console" ];
-          # The LUKS prompt goes to the serial console so the test can answer it.
+          # LUKS prompt on the serial console so the test can answer it
           boot.plymouth.enable = lib.mkForce false;
-          # This VM has no network. Don't retry Flathub for the whole test.
+          # no network here, don't keep retrying Flathub
           systemd.services.flatpak-managed-install.serviceConfig.Restart = lib.mkForce "no";
           systemd.user.services.nixbook-gradia-capture.serviceConfig.Restart = lib.mkForce "no";
         }
@@ -61,8 +60,7 @@ pkgs.testers.runNixOSTest {
           "-device nvme,serial=nixbook0,drive=nvm"
         ];
       };
-      # cryptsetup is how the test reads the LUKS header back. Disko brings its
-      # own copy for the install, which is not on PATH afterwards.
+      # to read the LUKS header back; disko's copy isn't on PATH after the install
       environment.systemPackages = [
         installScript
         pkgs.cryptsetup
@@ -79,8 +77,7 @@ pkgs.testers.runNixOSTest {
     with subtest("install"):
         installer.start()
         installer.wait_for_unit("multi-user.target")
-        # Refused before anything is wiped: a missing secret, a reserved or
-        # invalid name, a ':' in the full name
+        # must fail before anything is wiped
         installer.fail("${installEnv} NB_PASSWORD= nixbook-install < /dev/null")
         installer.fail("${installEnv} NB_LUKS= nixbook-install < /dev/null")
         installer.fail("${installEnv} NB_USER=nordvpn nixbook-install < /dev/null")
@@ -92,12 +89,12 @@ pkgs.testers.runNixOSTest {
         installer.succeed("cryptsetup luksDump /dev/nvme0n1p2 | grep -q 'Version:.*2'")
         installer.succeed("cryptsetup luksDump /dev/nvme0n1p2 | grep -q argon2id")
         installer.succeed("test -f /mnt/etc/nixos/flake.nix -a -f /mnt/etc/nixos/flake.lock")
-        # The account is complete before the first boot
+        # groups are there before the first boot
         for g in ["wheel", "networkmanager", "libvirtd", "nordvpn", "video", "audio"]:
             installer.succeed(f"grep -E '^{g}:.*[:,]alice(,|$)' /mnt/etc/group")
         installer.shutdown()
 
-    # Secure Boot capable firmware with empty key store (= Setup Mode)
+    # Secure Boot capable firmware with an empty key store (Setup Mode)
     vars = os.path.join(installer.state_dir, "OVMF_VARS.fd")
     shutil.copy("${ovmf}/FV/OVMF_VARS.fd", vars)
     os.chmod(vars, 0o644)
@@ -115,9 +112,9 @@ pkgs.testers.runNixOSTest {
         laptop.send_console("${luks}\n")
 
     def drop_stale_shell():
-        # Boot 1's backdoor banner stays in the virtio-console buffer across
-        # the reboot. connect() would treat that old banner as a live shell
-        # and then read the Secure Boot enroll screen as a command result.
+        # The backdoor banner from boot 1 is still in the virtio-console buffer.
+        # connect() would take it for a live shell and then read the enroll
+        # screen as command output.
         laptop.connected = False
         if laptop.shell is None:
             return
@@ -129,8 +126,8 @@ pkgs.testers.runNixOSTest {
                 break
 
     with subtest("boot 1: unlock, keys generated + prepared, automatic reboot"):
-        # allow_reboot keeps QEMU alive across the lanzaboote reboot. The
-        # kernel prints "Restarting system" (no "reboot:" prefix).
+        # allow_reboot keeps QEMU running across the lanzaboote reboot. The kernel
+        # prints "Restarting system" without the "reboot:" prefix.
         laptop.start(allow_reboot=True)
         unlock()
         laptop.wait_for_console_text("Restarting system")
@@ -163,7 +160,7 @@ pkgs.testers.runNixOSTest {
         laptop.succeed("test \"$(getent passwd alice | cut -d: -f5)\" = 'Alice Test'")
         laptop.succeed("passwd -S alice | grep -q ' P '")
         laptop.wait_for_unit("display-manager.service")
-        # No setup screen in GDM, and no first-login wizard either
+        # no initial setup, neither in GDM nor at first login
         laptop.wait_until_succeeds("pgrep -f '[g]nome-shell'", timeout=300)
         laptop.fail("pgrep -af '[g]nome-initial-setup'")
         laptop.fail("test -e /etc/xdg/autostart/gnome-initial-setup-first-login.desktop")
@@ -190,8 +187,7 @@ pkgs.testers.runNixOSTest {
             assert g not in out.split(), f"bob in {g}: {out}"
 
     with subtest("an administrator made in GNOME Settings gets the admin groups"):
-        # Adding the groups writes /etc/group, which starts the service again;
-        # that must not run into systemd's start limit
+        # adding the groups triggers the path unit again, must not hit the start limit
         laptop.succeed(
             "busctl call org.freedesktop.Accounts /org/freedesktop/Accounts "
             "org.freedesktop.Accounts CreateUser ssi carol 'Carol Test' 1"
@@ -205,8 +201,8 @@ pkgs.testers.runNixOSTest {
         laptop.succeed("userdel -r carol")
 
     with subtest("accounts can run rootless containers"):
-        # No generation declares alice, so NixOS itself gives her no
-        # subordinate IDs; nixbook-setup-accounts must, also after activation.
+        # alice isn't declared anywhere, so NixOS gives her no subuids;
+        # nixbook-setup-accounts has to, also after activation
         laptop.succeed("grep -qx 'alice:100000:65536' /etc/subuid")
         laptop.succeed("grep -qx 'alice:100000:65536' /etc/subgid")
         laptop.succeed("grep -q '\"alice\":100000' /var/lib/nixos/auto-subuid-map")
@@ -218,10 +214,9 @@ pkgs.testers.runNixOSTest {
         assert "100000" in out, out
         laptop.succeed("userdel -r bob")
     with subtest("a generation that would delete the installed user is refused"):
-        # No generation has declared alice, so the check passes.
+        # no generation has declared alice yet
         laptop.succeed("/run/current-system/bin/switch-to-configuration check")
-        # Once a generation has declared her, NixOS deletes her from any later
-        # generation without her. The pre-switch check must stop that.
+        # once one has, NixOS would delete her from later generations
         laptop.succeed("cp /var/lib/nixos/declarative-users /tmp/decl")
         laptop.succeed("printf ' alice' >> /var/lib/nixos/declarative-users")
         out = laptop.fail("/run/current-system/bin/switch-to-configuration check 2>&1")
@@ -244,15 +239,15 @@ pkgs.testers.runNixOSTest {
             out = laptop.succeed(fc + " '" + generic + "'")
             print(generic, "->", out)
             assert family in out, (generic, out)
-        # The copy in the home directory that Flatpaks read
+        # the copy flatpaks read
         conf = "/home/alice/.config/fontconfig/conf.d/50-nixbook-fonts.conf"
         script = laptop.succeed(
             "sed -n 's/^ExecStart=//p' /etc/systemd/user/nixbook-fontconfig.service"
         ).strip()
         laptop.succeed(f"runuser -u alice -- env HOME=/home/alice {script}")
         laptop.succeed(f"test $(stat -c %U {conf}) = alice")
-        # Specifiers that need a login session are skipped here, so only the
-        # result counts, not the exit code
+        # specifiers that need a session get skipped here, so check the result,
+        # not the exit code
         laptop.execute("runuser -u alice -- env HOME=/home/alice systemd-tmpfiles --user --create")
         laptop.succeed(f"test -f {conf} && ! test -L {conf} && grep -q 'Liberation Sans' {conf}")
         laptop.succeed("grep -qx 'font-family = JetBrainsMono Nerd Font' /home/alice/.config/ghostty/config")
@@ -264,23 +259,23 @@ pkgs.testers.runNixOSTest {
             laptop.succeed(f"test -f /etc/pam.d/{svc} && ! grep -q pam_fprintd /etc/pam.d/{svc}")
 
     with subtest("DHCPv6 identity differs per network"):
-        # What NetworkManager itself reads, not just the file
+        # ask NetworkManager, not the file
         conf = laptop.succeed("NetworkManager --print-config")
         print(conf)
         assert "ipv6.dhcp-duid=stable-uuid" in conf, conf
-        # Wi-Fi only: NetworkManager leaves every wired port alone
+        # Wi-Fi only
         assert "unmanaged-devices=type:ethernet" in conf, conf
 
     with subtest("firmware updates, reboot reminder, container image cleanup"):
-        # No updatable devices in this VM: the check runs and stays quiet
+        # nothing to update in the VM, so the check stays quiet
         laptop.succeed("systemctl start nixbook-firmware-check.service")
         laptop.succeed("test ! -e /var/lib/nixbook-upgrade/firmware-notified")
         tile = laptop.succeed("readlink -f $(command -v nixbook-update)").strip()
         fw = laptop.succeed(f"grep -o '/nix/store/[a-z0-9]*-nixbook-firmware-update' {tile} | head -1").strip()
         laptop.succeed(f"grep -q -- '--no-unreported-check' {fw}")
-        # Running the update script itself: nothing to update counts as success
+        # nothing to update counts as success
         laptop.succeed(fw)
-        # Booted system is the newest: no reminder, no error
+        # booted system is the newest one, so no reminder
         laptop.succeed("systemctl start nixbook-reboot-reminder.service")
         laptop.succeed("test -f /etc/systemd/user/nixbook-podman-prune.service")
         laptop.succeed("runuser -u alice -- podman image prune --force")
@@ -302,18 +297,17 @@ pkgs.testers.runNixOSTest {
         laptop.fail("command -v gnome-software")
         laptop.fail("command -v gnome-text-editor")
         laptop.succeed("systemctl is-active nordvpnd.socket")
-        # Browser policies must be real files: Flatpak sandboxes can't see /nix/store
+        # must be a real file, flatpaks can't see /nix/store
         p = "/etc/brave/policies/managed/nixbook.json"
         laptop.succeed(f"test -f {p} && ! test -L {p} && grep -q : {p}")
         laptop.succeed(f"grep -q '\"BraveAIChatEnabled\":false' {p}")
-        # British English is there to pick in Settings
+        # en_GB is available in Settings
         laptop.succeed("locale -a | grep -qi '^en_GB.utf-\\?8$'")
 
     with subtest("gradia-capture installs in the graphical user's home"):
-        # The VM has no internet, so the clone itself is not run here. The
-        # installed system must still carry the exact steps: check the latest
-        # commit, shallow-clone into a temporary directory, bash build.sh
-        # (NixOS has no /bin/bash), install the zip, remove the clone.
+        # No internet, so the clone isn't run. Check the script has the right
+        # steps: ls-remote, shallow clone into a temp dir, bash build.sh (no
+        # /bin/bash on NixOS), install the zip, remove the clone.
         laptop.succeed(
             "test -L /etc/systemd/user/graphical-session.target.wants/nixbook-gradia-capture.service"
         )
@@ -332,11 +326,10 @@ pkgs.testers.runNixOSTest {
             f"grep -q 'gnome-extensions install --force' {script}"
         )
         laptop.fail("grep -E '^(User|Group)=' /etc/systemd/user/nixbook-gradia-capture.service")
-        # The GDM greeter session (uid above 29999) is skipped without retries.
+        # the greeter (uid > 29999) is skipped without retries
         laptop.succeed(f"runuser -u nobody -- env HOME=/tmp/greeter {script}")
         laptop.fail("test -e /tmp/greeter/Downloads")
-        # A checkout left in ~/Downloads by earlier versions is removed when it
-        # is the untouched upstream clone, and kept when the user changed it.
+        # old ~/Downloads checkout: removed if untouched, kept if the user changed it
         old = "/home/alice/Downloads/gradia-capture"
         laptop.succeed(
             f"runuser -u alice -- sh -c 'mkdir -p {old} && cd {old} && git init -q && "
@@ -348,7 +341,7 @@ pkgs.testers.runNixOSTest {
             f"runuser -u alice -- sh -c 'mkdir -p {old} && cd {old} && git init -q && "
             "git remote add origin https://github.com/AlexanderVanhee/gradia-capture && touch mine'"
         )
-        # A real user waits for the Gradia Flatpak, which this offline VM lacks.
+        # a real user waits for the Gradia flatpak, which isn't there offline
         laptop.fail(f"runuser -u alice -- env HOME=/home/alice {script}")
         laptop.succeed(f"test -e {old}/mine")
         laptop.succeed(f"rm -rf {old}")
@@ -361,8 +354,8 @@ pkgs.testers.runNixOSTest {
 
     with subtest("time zone: Amsterdam to start with, the user's choice after that"):
         def zone():
-            # timedated keeps the zone in memory while it runs; make it read
-            # /etc/localtime again, and check the link itself as well
+            # timedated caches the zone while it runs, restart it and also check
+            # the link itself
             laptop.succeed("systemctl stop systemd-timedated.service")
             link = laptop.succeed("readlink /etc/localtime").strip()
             live = laptop.succeed("timedatectl show -p Timezone --value").strip()
@@ -370,13 +363,13 @@ pkgs.testers.runNixOSTest {
             return live
 
         assert zone() == "Europe/Amsterdam", zone()
-        # What Settings > Date & Time does
+        # what Settings > Date & Time does
         laptop.succeed("timedatectl set-timezone Europe/London")
         assert zone() == "Europe/London", zone()
-        # A rebuild keeps the chosen zone
+        # rebuild keeps it
         laptop.succeed("/run/current-system/activate")
         assert zone() == "Europe/London", zone()
-        # Without a zone (fresh install, older laptops) it is Amsterdam again
+        # no zone at all: back to Amsterdam
         laptop.succeed("rm /etc/localtime && /run/current-system/activate")
         assert zone() == "Europe/Amsterdam", zone()
 
@@ -386,17 +379,17 @@ pkgs.testers.runNixOSTest {
         assert re.fullmatch(r"DESKTOP-[A-HJ-NP-Z0-9]{7}", host), host
         laptop.succeed(f"test \"$(cat /etc/hostname)\" = {host}")
         laptop.fail("test -L /etc/hostname")
-        # A rebuild keeps it
+        # rebuild keeps it
         laptop.succeed("/run/current-system/activate")
         laptop.succeed(f"test \"$(cat /etc/hostname)\" = {host}")
-        # Older installs lose the NixOS-made file on the first rebuild; the
-        # running name is written back
+        # older installs lose the NixOS-made file on the first rebuild, the
+        # running name gets written back
         laptop.succeed("rm /etc/hostname && /run/current-system/activate")
         laptop.succeed(f"test \"$(cat /etc/hostname)\" = {host}")
 
     with subtest("report"):
         print(laptop.succeed("systemctl --failed --no-legend || true"))
-        # Only the Flathub install may fail here: this VM has no internet
+        # only the Flathub install may fail, there's no internet here
         failed = set(laptop.succeed("systemctl --failed --plain --no-legend | awk '{print $1}'").split())
         assert failed <= {"flatpak-managed-install.service"}, failed
         print(laptop.succeed("systemd-analyze || true"))

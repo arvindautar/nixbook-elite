@@ -1,27 +1,27 @@
-# Hardening with negligible performance cost.
-# Deliberately NOT used (too slow or breaks things): init_on_free, hardened_malloc,
-# lockdown= (NixOS modules are unsigned), mitigations=auto,nosmt.
+# Cheap hardening. Left out on purpose because they're slow or break things:
+# init_on_free, hardened_malloc, lockdown= (modules aren't signed),
+# mitigations=auto,nosmt.
 { lib, ... }:
 
 {
-  # --- AppArmor (MAC) ---
+  # AppArmor
   security.apparmor = {
     enable = true;
     killUnconfinedConfinables = false;
   };
 
-  # --- Firewall: nftables, drop everything inbound, don't answer pings (stealth) ---
+  # nftables, drop everything inbound, no ping replies
   networking.nftables.enable = true;
   networking.firewall = {
     enable = true;
     allowPing = false;
     rejectPackets = false; # drop silently: ports look "stealth", not "closed"
     logRefusedConnections = false;
-    # VPN (NordLynx/WireGuard) needs loose reverse path filtering
+    # needed for NordLynx/WireGuard
     checkReversePath = "loose";
   };
 
-  # --- Kernel ---
+  # kernel
   boot.kernelParams = [
     "init_on_alloc=1" # ~1% cost, zeroes new allocations
     "slab_nomerge"
@@ -47,7 +47,7 @@
     "fs.suid_dumpable" = 0;
     "dev.tty.ldisc_autoload" = 0;
 
-    # Network stack
+    # network
     "net.ipv4.tcp_syncookies" = 1;
     "net.ipv4.tcp_rfc1337" = 1;
     "net.ipv4.conf.all.accept_redirects" = 0;
@@ -64,7 +64,7 @@
     "net.ipv4.conf.all.log_martians" = 0;
   };
 
-  # Obscure network protocols and old filesystems nobody uses on a laptop
+  # protocols and filesystems a laptop doesn't need
   boot.blacklistedKernelModules = [
     "dccp"
     "sctp"
@@ -94,15 +94,14 @@
     "vivid"
   ];
 
-  # --- Privilege ---
+  # privileges
   security.sudo = {
     execWheelOnly = true;
     wheelNeedsPassword = true;
   };
   security.polkit.enable = true;
-  # The fingerprint reader (fprintd) unlocks the login and lock screen only.
-  # NixOS would also accept it for these, so admin rights, accounts and
-  # passwords keep asking for the password.
+  # Fingerprint only for GDM (login and lock screen). With fprintd on, NixOS
+  # enables it for every PAM service, sudo and polkit included.
   security.pam.services =
     lib.genAttrs
       [
@@ -130,13 +129,13 @@
         fprintAuth = false;
       });
 
-  # Thunderbolt devices must be authorised (GNOME asks)
+  # Thunderbolt devices need to be authorized, GNOME asks
   services.hardware.bolt.enable = true;
 
-  # The TPM stays available to the firmware. Disk unlock is the passphrase.
+  # TPM stays available to the firmware, the disk is unlocked with a passphrase
   security.tpm2.enable = true;
 
-  # No core dumps (they can contain passwords/keys)
+  # core dumps can contain passwords and keys
   systemd.coredump.settings.Coredump.Storage = "none";
   security.pam.loginLimits = [
     {

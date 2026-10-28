@@ -1,6 +1,5 @@
-# Spell checking for Dutch and British English: Hunspell dictionaries for
-# GNOME apps (enchant) and the hunspell command (DICPATH). The Flatpak browsers
-# and ONLYOFFICE bring their own.
+# Dutch and British English hunspell dictionaries for GNOME apps (enchant)
+# and the hunspell CLI. Flatpaks and ONLYOFFICE ship their own.
 { pkgs, ... }:
 
 {

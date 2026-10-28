@@ -1,5 +1,5 @@
-# NordVPN daemon + CLI + GUI, using the module and package from nixos-unstable
-# (not in 26.05). Run `nordvpn login` or open "NordVPN" from the app grid.
+# NordVPN daemon, CLI and GUI. Module and package come from unstable, 26.05
+# doesn't have them.
 {
   inputs,
   pkgs-unstable,
@@ -16,8 +16,8 @@
     package = pkgs-unstable.nordvpn;
   };
 
-  # The module starts the daemon from graphical.target without requiring its
-  # socket. On a rebuild the daemon could then come back first, and systemd
-  # refuses to start the socket ("Socket service already active"), failing the switch.
+  # The module starts nordvpnd from graphical.target without requiring the
+  # socket, so on a rebuild the daemon can come up first and the switch fails
+  # with "Socket service already active".
   systemd.services.nordvpnd.requires = [ "nordvpnd.socket" ];
 }

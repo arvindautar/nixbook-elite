@@ -1,5 +1,5 @@
-# Full GNOME desktop, no bundled apps: Ghostty, Bazaar, Nautilus and VS Code only.
-# Everything else comes from Flathub via Bazaar.
+# GNOME without the bundled apps. Ghostty, Bazaar, Nautilus and VS Code come
+# from nixpkgs, everything else from Flathub.
 {
   pkgs,
   pkgs-unstable,
@@ -11,11 +11,11 @@
   services.displayManager.gdm.enable = true;
   services.desktopManager.gnome.enable = true;
 
-  # Keep the GNOME platform (shell, settings, portals, keyring, GVfs...), drop the apps
+  # keep the platform (shell, settings, portals, keyring, gvfs), drop the apps
   services.gnome.core-apps.enable = false;
   services.gnome.core-developer-tools.enable = false;
   services.gnome.games.enable = false;
-  # Nothing that could expose this laptop on a network
+  # nothing that listens on the network
   services.gnome.gnome-remote-desktop.enable = false;
   services.gnome.gnome-user-share.enable = false;
   services.gnome.rygel.enable = false;
@@ -26,7 +26,7 @@
     gnome-software # replaced by Bazaar
   ];
 
-  # System tools that are not on Flathub
+  # not on Flathub
   programs.gnome-disks.enable = true;
   services.gnome.sushi.enable = true; # spacebar preview in Nautilus
 
@@ -34,7 +34,7 @@
     pkgs.ghostty
     pkgs.nautilus # not on Flathub
     pkgs.gnome-system-monitor # not on Flathub
-    # FHS variant: extensions that ship their own binaries (language servers etc.) work
+    # FHS so extensions that ship their own binaries (language servers) work
     pkgs.vscode.fhs
     pkgs-unstable.bazaar
     pkgs-unstable.gnomeExtensions.appindicator # tray icons (NordVPN GUI)
@@ -50,34 +50,32 @@
     settings.default = [ "com.mitchellh.ghostty.desktop" ];
   };
 
-  # The Brave Flatpak reads the host's /etc/brave/policies. This turns off what
-  # Brave sends on its own. Safe Browsing, component updates (ad-block lists,
-  # certificate revocation) and variations (remote fixes) stay on for security;
-  # Leo (AI) is off, like Brave Origin; Translate, Sync, Wayback Machine and search
-  # suggestions stay the user's choice.
-  # A real file, not a symlink: the sandbox can't see /etc/static (/nix/store).
+  # The Brave flatpak reads /etc/brave/policies from the host. Has to be a real
+  # file, the sandbox can't follow the symlink into /nix/store.
+  # Safe Browsing, component updates and variations stay on (security fixes).
+  # Translate, Sync, Wayback Machine and search suggestions are up to the user.
   environment.etc."brave/policies/managed/nixbook.json".mode = "0444";
   environment.etc."brave/policies/managed/nixbook.json".text = builtins.toJSON {
-    # Telemetry and pings
+    # telemetry
     BraveP3AEnabled = false;
     BraveStatsPingEnabled = false;
     BraveWebDiscoveryEnabled = false;
     MetricsReportingEnabled = false;
-    # Brave services nobody here uses (the wallet is also attack surface)
+    # not used here, and the wallet is attack surface
     BraveRewardsDisabled = true;
     BraveWalletDisabled = true;
     BraveVPNDisabled = true;
     BraveNewsDisabled = true;
     BraveTalkDisabled = true;
-    # Leo, the AI assistant: sends what you ask (and page content) to Brave's servers
+    # Leo (AI) sends prompts and page content to Brave
     BraveAIChatEnabled = false;
-    # Don't preload pages you never open
+    # no prefetching
     NetworkPredictionOptions = 2;
-    # Closing the last window really quits, so an update is used on the next start
+    # really quit on last window close, so updates apply on next start
     BackgroundModeEnabled = false;
   };
 
-  # Sensible GNOME defaults (users can change all of them)
+  # defaults only, users can change all of these
   programs.dconf.profiles.user.databases = [
     {
       settings = {
@@ -107,7 +105,7 @@
           show-battery-percentage = true;
           clock-show-weekday = true;
         };
-        # Week numbers in the top bar clock/calendar
+        # week numbers in the top bar calendar
         "org/gnome/desktop/calendar".show-weekdate = true;
         "org/gnome/desktop/wm/preferences".button-layout = "appmenu:minimize,maximize,close";
         "org/gnome/desktop/peripherals/touchpad" = {
@@ -117,7 +115,7 @@
           edge-tiling = true;
           dynamic-workspaces = true;
         };
-        # Privacy
+        # privacy
         "org/gnome/system/location".enabled = false;
         "org/gnome/desktop/privacy" = {
           report-technical-problems = false;
@@ -134,7 +132,7 @@
     }
   ];
 
-  # Default apps (Flatpaks from flatpak.nix)
+  # default apps (flatpaks from flatpak.nix)
   xdg.mime.defaultApplications =
     let
       for = app: types: lib.genAttrs types (_: app);

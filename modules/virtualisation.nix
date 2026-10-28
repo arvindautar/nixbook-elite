@@ -1,5 +1,5 @@
-# libvirt/KVM VMs and distrobox (on podman). Everything is socket-activated: no boot cost.
-# A GUI (virt-manager or GNOME Boxes) can be installed from Flathub via Bazaar.
+# libvirt/KVM and distrobox on podman, all socket activated. For a GUI,
+# install virt-manager or Boxes from Flathub.
 { config, pkgs, ... }:
 
 {
@@ -24,9 +24,8 @@
 
   environment.systemPackages = [ pkgs.distrobox ];
 
-  # autoPrune above only cleans root's containers. Each account's own image
-  # store (~/.local/share/containers) loses its unused layers weekly. Only
-  # dangling images: images that containers and distroboxes use are kept.
+  # autoPrune only covers root. Prune dangling images in each user's store
+  # too; images used by containers (distrobox) are left alone.
   systemd.user.services.nixbook-podman-prune = {
     description = "Remove unused container image layers";
     unitConfig = {
@@ -49,6 +48,6 @@
     };
   };
 
-  # VM disks on btrfs: no copy-on-write (avoids fragmentation)
+  # nodatacow for VM disks
   systemd.tmpfiles.rules = [ "h /var/lib/libvirt/images - - - - +C" ];
 }

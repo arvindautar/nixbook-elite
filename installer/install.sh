@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # nixbook-install: offline installer for the HP EliteBook 840 G10.
-# Placeholders @...@ are filled in by installer/iso.nix.
-# The first account is made here, but stays out of the flake: accounts.nix
-# gives it its groups and container ID ranges.
-# Non-interactive use (tests): NB_USER NB_FULLNAME NB_PASSWORD NB_LUKS NB_CONFIRM=yes
+# The @...@ placeholders are filled in by installer/script.nix.
+# Creates the first account. It's not added to the flake, accounts.nix takes
+# care of its groups and subuid ranges.
+# For tests: NB_USER NB_FULLNAME NB_PASSWORD NB_LUKS NB_CONFIRM=yes
 set -euo pipefail
 
 TOPLEVEL="@toplevel@"
 DISKO="@disko@"
 FLAKE_SRC="@flake@"
-# Accounts and groups the system itself declares; the new user must not reuse one
+# users and groups the system already has
 RESERVED=" @reserved@ "
 DISK="/dev/nvme0n1"
 KEYFILE="/tmp/nixbook-luks.key"
@@ -24,7 +24,7 @@ die() { printf '\n\033[31mFOUT: %s\033[0m\n' "$*" >&2; exit 1; }
 valid_user() {
   [[ "$1" =~ ^[a-z_][a-z0-9_-]{0,30}$ ]] && [[ "$RESERVED" != *" $1 "* ]]
 }
-# useradd refuses ':' and control characters in the full name
+# useradd doesn't accept ':' or control characters in the comment field
 valid_fullname() {
   [[ "$1" != *[[:cntrl:]:]* ]]
 }
@@ -64,14 +64,14 @@ if [ -z "${NB_USER:-}" ]; then
 fi
 valid_user "$NB_USER" || die "Ongeldige gebruikersnaam: $NB_USER"
 valid_fullname "${NB_FULLNAME:-}" || die "Ongeldige volledige naam."
-# Non-interactive runs must bring both secrets; check before anything is wiped
+# check before anything gets wiped
 [ -n "${NB_PASSWORD:-}" ] && [ -n "${NB_LUKS:-}" ] || die "Wachtwoord of LUKS-wachtzin ontbreekt."
 if [ "${NB_CONFIRM:-}" != "yes" ]; then
   read -r -p "Typ WISSEN om $DISK te wissen en te installeren: " c
   [ "$c" = "WISSEN" ] || die "Geannuleerd."
 fi
 
-# Secure Boot state, for the instructions at the end
+# for the Secure Boot hints at the end
 setup_mode=0
 for f in /sys/firmware/efi/efivars/SetupMode-*; do
   if [ -e "$f" ] && [ "$(od -An -t u1 -j4 -N1 "$f" | tr -d ' ')" = "1" ]; then
@@ -79,7 +79,7 @@ for f in /sys/firmware/efi/efivars/SetupMode-*; do
   fi
 done
 
-# HP Sure Start restores the factory keys after our enrollment unless this is off
+# HP Sure Start puts the factory keys back after enrollment unless this is off
 sb_protect=$(cat "/sys/class/firmware-attributes/hp-bioscfg/attributes/Sure Start Secure Boot Keys Protection/current_value" 2>/dev/null || true)
 
 bold "1/4 Partitioneren en versleutelen (LUKS2 + btrfs)"
@@ -92,16 +92,15 @@ bold "2/4 Systeem installeren (offline)"
 nixos-install --system "$TOPLEVEL" --no-root-passwd --no-channel-copy
 
 bold "3/4 Gebruiker aanmaken"
-# An administrator with all admin groups right away; accounts.nix adds the
-# container ID ranges on the first boot.
+# admin with all the extra groups, accounts.nix adds subuid ranges on first boot
 printf -v account_command 'useradd -m -u 1000 -c %q -G wheel,networkmanager,libvirtd,nordvpn,video,audio %q' \
   "${NB_FULLNAME:-$NB_USER}" "$NB_USER"
 nixos-enter --root /mnt -c "$account_command"
 printf '%s:%s\n' "$NB_USER" "$NB_PASSWORD" | nixos-enter --root /mnt -c chpasswd
 
 bold "4/4 Configuratie naar /etc/nixos kopiëren"
-# Like a fresh Windows PC: DESKTOP- and 7 random characters, new for every laptop.
-# The flake sets no hostname, so NixOS keeps this file on every rebuild.
+# DESKTOP- plus 7 random characters, like a fresh Windows install. The flake
+# sets no hostname, so NixOS leaves /etc/hostname alone.
 chars=ABCDEFGHJKLMNPQRSTUVWXYZ0123456789
 host=DESKTOP-
 for b in $(od -An -N7 -tu1 /dev/urandom); do host+=${chars:$((b % ${#chars})):1}; done
