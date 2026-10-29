@@ -45,7 +45,8 @@ starts as Amsterdam and can be changed in Settings > Date & Time.
   enrolled automatically. Microsoft's keys are kept for option ROMs and HP
   firmware.
 - LUKS2 (aes-xts, argon2id), unlocked with a passphrase. No TPM, no PIN.
-- nftables firewall that drops everything inbound and doesn't answer pings.
+- nftables firewall that drops everything inbound except mDNS replies (to find
+  printers) and doesn't answer pings.
   AppArmor is on.
 - Kernel hardening that costs next to nothing (`init_on_alloc`,
   `slab_nomerge`, kptr/dmesg/BPF/ptrace restrictions, no kexec, IOMMU for
