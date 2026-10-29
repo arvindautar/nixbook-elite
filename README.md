@@ -99,7 +99,10 @@ starts as Amsterdam and can be changed in Settings > Date & Time.
   since the last one, on AC power and online. If so it updates the flake
   inputs, commits `flake.lock` and builds the new system in the background. It
   becomes active after the next reboot.
-- If the build fails, the old lock is put back and you get a notification.
+- If the build fails, the old lock is put back. If nixos-unstable was the
+  problem, the stable NixOS updates (with the security fixes) are still
+  installed and the rest is tried again next time. If nothing can be
+  updated, you get one notification a day while it keeps failing.
 - Flatpaks (also the ones installed with Bazaar) update every 4 hours. If an
   app you have open got updated, a notification asks you to restart it.
 - Old generations are garbage collected depending on free disk space.

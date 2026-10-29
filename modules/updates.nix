@@ -51,6 +51,7 @@ let
         pkgs.nixos-rebuild
         pkgs.git
         pkgs.coreutils
+        pkgs.findutils
         pkgs.systemd
         pkgs.curl
       ]
@@ -88,15 +89,45 @@ let
       fi
     }
 
-    # if the build fails, put the old lock back
-    lock_committed=0
-    rollback_lock() {
-      if [ "$lock_committed" = 1 ]; then
-        git_nixbook revert --no-edit HEAD || true
-        lock_committed=0
-      else
+    # try_update [input...]: update these inputs (all without any) and build
+    # the system for the next boot. Puts the old lock back if that fails.
+    # Called from `if`, so set -e is off in here and every step is checked.
+    try_update() {
+      local committed=0
+      if ! nix flake update --flake ${flakeDir} "$@"; then
         git_nixbook checkout -- flake.lock || true
+        return 1
       fi
+      if [ -n "$(git_nixbook status --porcelain -- flake.lock)" ]; then
+        if ! git_nixbook add flake.lock ||
+          ! git_nixbook commit -m "flake update $(date +%F)''${1:+ ($*)}"; then
+          git_nixbook checkout -- flake.lock || true
+          return 1
+        fi
+        committed=1
+      fi
+      if ! nixos-rebuild boot --flake ${flakeDir}#nixbook; then
+        if [ "$committed" = 1 ]; then
+          git_nixbook revert --no-edit HEAD || true
+        else
+          git_nixbook checkout -- flake.lock || true
+        fi
+        return 1
+      fi
+    }
+
+    # The timer retries a failed update a few times a day. Tell the user once
+    # a day, not every time.
+    failStamp=/var/lib/nixbook-upgrade/last-failure-notice
+    quiet=0
+    if [ "''${1:-}" = "--if-due" ] && [ -n "$(find "$failStamp" -mmin -1440 2>/dev/null)" ]; then
+      quiet=1
+    fi
+    notify() { [ "$quiet" = 1 ] || ${notifyUsers} "$@"; }
+    fail() {
+      notify "Update mislukt" "Het systeem is niet bijgewerkt en blijft zoals het was. Details: journalctl -u nixbook-upgrade"
+      mkdir -p "$(dirname "$failStamp")"
+      touch "$failStamp"
     }
 
     if [ "''${1:-}" = "--if-due" ]; then
@@ -120,22 +151,27 @@ let
       fi
     fi
 
-    trap 'rollback_lock; ${notifyUsers} "Update mislukt" "Het systeem is niet bijgewerkt. De flake.lock van voor deze poging is teruggezet. Details: journalctl -u nixbook-upgrade"' ERR
-    ${notifyUsers} "Updates worden geïnstalleerd" "Dit gebeurt op de achtergrond, je kunt gewoon doorwerken."
+    trap fail ERR
+    notify "Updates worden geïnstalleerd" "Dit gebeurt op de achtergrond, je kunt gewoon doorwerken."
     ensure_git
-    nix flake update --flake ${flakeDir}
-    if [ -n "$(git_nixbook status --porcelain -- flake.lock)" ]; then
-      git_nixbook add flake.lock
-      git_nixbook commit -m "flake update $(date +%F)"
-      lock_committed=1
+    # nixos-unstable (AI CLIs, Bazaar, NordVPN, extensions) can break the
+    # build. Then still take the stable NixOS updates, they carry the
+    # security fixes. The rest is tried again with the next update.
+    if try_update; then
+      done_msg="Herstart wanneer het je uitkomt om de updates te gebruiken."
+    elif try_update nixpkgs; then
+      done_msg="Herstart wanneer het je uitkomt om de updates te gebruiken. Een paar apps uit nixos-unstable zijn nog niet bijgewerkt, dat gebeurt bij de volgende update."
+    else
+      trap - ERR
+      fail
+      exit 1
     fi
-    nixos-rebuild boot --flake ${flakeDir}#nixbook
-    lock_committed=0
     trap - ERR
+    rm -f "$failStamp"
     ${collectGarbage}
     mkdir -p "$(dirname ${stampFile})"
     touch ${stampFile}
-    ${notifyUsers} "Updates klaar" "Herstart wanneer het je uitkomt om de updates te gebruiken."
+    ${notifyUsers} "Updates klaar" "$done_msg"
   '';
 
   # nix-flatpak only updates its own apps, this also covers Bazaar installs
