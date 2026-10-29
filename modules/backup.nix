@@ -75,8 +75,14 @@ let
       --exclude '/home/*/.cache' \
       --exclude '/home/*/.var/app/*/cache' \
       --exclude '/home/*/.local/share/Trash'
-    ${pkgs.restic}/bin/restic forget --repo "$repo" --prune \
+    ${pkgs.restic}/bin/restic forget --repo "$repo" \
       --keep-daily 14 --keep-weekly 8 --keep-monthly 12
+    # Pruning rewrites packs on the disk, so once a week, not every hour
+    pruned="$mnt/nixbook-pruned"
+    if [ -z "$(${pkgs.findutils}/bin/find "$pruned" -mtime -7 2>/dev/null)" ]; then
+      ${pkgs.restic}/bin/restic prune --repo "$repo"
+      touch "$pruned"
+    fi
     echo "Backup van /home staat op $label ($repo)."
   '';
 in
