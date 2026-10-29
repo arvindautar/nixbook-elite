@@ -65,11 +65,6 @@
     openFirewall = true;
   };
 
-  programs.appimage = {
-    enable = true;
-    binfmt = true;
-  };
-
   environment.systemPackages = with pkgs; [
     git
     libnotify
