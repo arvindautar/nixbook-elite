@@ -223,41 +223,86 @@ pkgs.testers.runNixOSTest {
         assert "alice" in out, out
         laptop.succeed("cp /tmp/decl /var/lib/nixos/declarative-users")
 
-    with subtest("fonts: Leap families, JetBrains Mono, also for Flatpaks"):
-        fc = "${target.pkgs.fontconfig.bin}/bin/fc-match -f '%{family}\\n'"
-        for generic, family in [
-            ("sans-serif", "Roboto"),
-            ("serif", "Noto Serif"),
-            ("monospace", "JetBrainsMono Nerd Font"),
-            ("ui-monospace", "JetBrainsMono Nerd Font"),
-            ("system-ui", "Adwaita Sans"),
-            ("emoji", "Noto Color Emoji"),
-            ("Arial", "Liberation Sans"),
-            ("Times New Roman", "Liberation Serif"),
-            ("Courier New", "Liberation Mono"),
-            ("Helvetica", "TeX Gyre Heros"),
+    with subtest("fonts: Ubuntu 26.04's matching, JetBrains Mono, also for Flatpaks"):
+        fcm = "${target.pkgs.fontconfig.bin}/bin/fc-match"
+        for pattern, family in [
+            (":family=sans-serif", "Noto Sans"),
+            (":family=serif", "Noto Serif"),
+            (":family=monospace", "JetBrainsMono Nerd Font"),
+            (":family=ui-monospace", "JetBrainsMono Nerd Font"),
+            # Ubuntu has no Adwaita Sans, web pages get sans-serif
+            (":family=system-ui", "Noto Sans"),
+            (":family=emoji", "Noto Color Emoji"),
+            (":family=Arial", "Liberation Sans"),
+            (":family=Times New Roman", "Liberation Serif"),
+            (":family=Courier New", "Liberation Mono"),
+            # no TeX Gyre, as on Ubuntu
+            (":family=Helvetica", "Liberation Sans"),
+            # fonts-noto-cjk's 70-fonts-noto-cjk.conf
+            ("sans-serif:lang=ja", "Noto Sans CJK JP"),
+            ("sans-serif:lang=zh-cn", "Noto Sans CJK SC"),
+            ("serif:lang=ko", "Noto Serif CJK KR"),
+            # 57-dejavu-sans
+            (":family=Bitstream Vera Sans", "DejaVu Sans"),
         ]:
-            out = laptop.succeed(fc + " :family='" + generic + "'")
-            print(generic, "->", out)
-            assert family in out, (generic, out)
-        render = laptop.succeed(
-            "${target.pkgs.fontconfig.bin}/bin/fc-match -f '%{hintstyle} %{rgba}\\n' :family=sans-serif"
-        ).strip()
+            out = laptop.succeed(f"{fcm} -f '%{{family}}\\n' '{pattern}'")
+            print(pattern, "->", out)
+            assert family in out, (pattern, out)
+        render = laptop.succeed(f"{fcm} -f '%{{hintstyle}} %{{rgba}}\\n' :family=sans-serif").strip()
         print("render", render)
         assert render == "1 1", render
-        # the copy flatpaks read
-        conf = "/home/alice/.config/fontconfig/conf.d/50-nixbook-fonts.conf"
+        # 20-unhint-small-dejavu-sans
+        laptop.succeed(f"test $({fcm} -f '%{{hinting}}' 'DejaVu Sans:pixelsize=7') = False")
+        # 70-no-bitmaps-except-emoji
+        laptop.succeed("test $(${target.pkgs.fontconfig.bin}/bin/fc-list :scalable=false | wc -l) = 0")
+        # Flatpaks get Ubuntu's whole configuration through FONTCONFIG_FILE
+        conf = "/home/alice/.config/fontconfig/nixbook-flatpak.conf"
+        old = "/home/alice/.config/fontconfig/conf.d/50-nixbook-fonts.conf"
+        laptop.succeed(f"runuser -u alice -- sh -c 'mkdir -p $(dirname {old}) && touch {old}'")
+        # a font cache from before; the system's font set is new to this account
+        cache = "/home/alice/.var/app/org.gnome.Loupe/cache/fontconfig"
+        laptop.succeed(f"runuser -u alice -- sh -c 'mkdir -p {cache} && touch {cache}/old-le64.cache-9'")
         script = laptop.succeed(
             "sed -n 's/^ExecStart=//p' /etc/systemd/user/nixbook-fontconfig.service"
         ).strip()
         laptop.succeed(f"runuser -u alice -- env HOME=/home/alice {script}")
         laptop.succeed(f"test $(stat -c %U {conf}) = alice")
+        laptop.fail(f"test -e {old}")
+        laptop.fail(f"test -e {cache}/old-le64.cache-9")
+        # same font set at the next login: caches stay
+        laptop.succeed(f"runuser -u alice -- touch {cache}/new-le64.cache-9")
+        laptop.succeed(f"runuser -u alice -- env HOME=/home/alice {script}")
+        laptop.succeed(f"test -e {cache}/new-le64.cache-9")
+        laptop.succeed(
+            f"grep -qx 'FONTCONFIG_FILE={conf}' /home/alice/.local/share/flatpak/overrides/global"
+        )
+        # the browsers get their own copy, which also turns Adwaita Sans into Noto Sans
+        browser_conf = "/home/alice/.config/fontconfig/nixbook-flatpak-browsers.conf"
+        laptop.succeed(f"grep -q '<string>Adwaita Sans</string>' {browser_conf}")
+        laptop.fail(f"grep -q '<string>Adwaita Sans</string>' {conf}")
+        for app in ["com.brave.Browser", "io.gitlab.librewolf-community"]:
+            laptop.succeed(
+                f"grep -qx 'FONTCONFIG_FILE={browser_conf}' /home/alice/.local/share/flatpak/overrides/{app}"
+            )
+        # parses without complaint (the sandbox's font dirs don't exist here)
+        laptop.fail(f"FONTCONFIG_FILE={conf} {fcm} sans 2>&1 | grep -i fontconfig")
+        # Brave's profile does not exist yet on a fresh install. The login
+        # script creates it so the first window already names these families.
+        prefs = "/home/alice/.var/app/com.brave.Browser/config/BraveSoftware/Brave-Browser/Default/Preferences"
+        laptop.succeed(
+            f"test -f {prefs} && grep -q 'Noto Sans' {prefs} && grep -q 'Noto Serif' {prefs} && grep -q 'JetBrainsMono Nerd Font' {prefs}"
+        )
         # specifiers that need a session get skipped here, so check the result,
         # not the exit code
         laptop.execute("runuser -u alice -- env HOME=/home/alice systemd-tmpfiles --user --create")
-        laptop.succeed(f"test -f {conf} && ! test -L {conf} && grep -q 'Roboto' {conf}")
-        laptop.succeed(f"grep -q 'Liberation Serif' {conf}")
+        laptop.succeed(f"test -f {conf} && ! test -L {conf}")
+        laptop.succeed(f"grep -q '<dir>/run/host/fonts</dir>' {conf}")
+        laptop.succeed(f"grep -q 'Ubuntu 70-fonts-noto-cjk.conf' {conf}")
         laptop.succeed(f"grep -q 'JetBrainsMono Nerd Font' {conf}")
+        # Brave's default faces are named in the login script. The generic word
+        # serif does not resolve to Noto Serif inside Brave.
+        laptop.succeed(f"grep -q 'Noto Serif' {script}")
+        laptop.succeed(f"grep -q 'JetBrainsMono Nerd Font' {script}")
         laptop.succeed("grep -qx 'font-family = JetBrainsMono Nerd Font' /home/alice/.config/ghostty/config")
         laptop.succeed("grep -q 'xdg-config/fontconfig:ro' /var/lib/flatpak/overrides/global")
 

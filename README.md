@@ -200,7 +200,8 @@ installer/
   iso.nix, script.nix      the ISO and how the installer gets built
 modules/
   base.nix                 Nix, locale, printing
-  fonts.nix                Liberation Sans/Serif, JetBrainsMono Nerd Font (same as Omarchy)
+  fonts.nix                Ubuntu 26.04's font matching, also in Flatpaks; Adwaita Sans UI (Noto Sans in the browsers), JetBrainsMono Nerd Font
+  fontconfig-ubuntu/       Ubuntu 26.04's fontconfig files, unchanged
   accounts.nix             groups and subuid ranges for every account
   boot.nix                 lanzaboote, kernel, quiet boot
   desktop.nix              GNOME, apps, Brave policies, defaults
