@@ -14,16 +14,16 @@
 let
   flakeDir = "/etc/nixos";
 
-  notifyUsers = pkgs.writeShellScript "notify-users" ''
-    title="$1"
-    body="$2"
-    for uid in $(${pkgs.systemd}/bin/loginctl list-users --no-legend | ${pkgs.gawk}/bin/awk '{print $1}'); do
-      user=$(${pkgs.coreutils}/bin/id -nu "$uid") || continue
-      [ -S "/run/user/$uid/bus" ] || continue
-      ${pkgs.util-linux}/bin/runuser -u "$user" -- env \
-        DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
-        ${pkgs.libnotify}/bin/notify-send -a "Systeemupdate" "$title" "$body" || true
-    done
+  notifyUsers = import ./notify-users.nix { inherit pkgs; };
+
+  # A phone's hotspot. Updates can be gigabytes, they wait for a normal network.
+  # 1 is yes, 3 is NetworkManager's guess, and no answer means not metered.
+  metered = pkgs.writeShellScript "nixbook-metered" ''
+    case "$(${pkgs.systemd}/bin/busctl get-property org.freedesktop.NetworkManager \
+      /org/freedesktop/NetworkManager org.freedesktop.NetworkManager Metered 2>/dev/null)" in
+      "u 1" | "u 3") exit 0 ;;
+    esac
+    exit 1
   '';
 
   collectGarbage = pkgs.writeShellScript "nixbook-gc" ''
@@ -38,10 +38,11 @@ let
   '';
 
   stampFile = "/var/lib/nixbook-upgrade/last-success";
+  systemProfile = "/nix/var/nix/profiles/system";
 
   # nixbook-upgrade [--if-due]
   # --if-due is what the timer uses: do nothing if the last update is less
-  # than 6 days old, or we're on battery or offline.
+  # than 6 days old, or we're on battery, offline or on a metered network.
   upgrade = pkgs.writeShellScript "nixbook-upgrade" ''
     # -E so the ERR trap also fires inside functions
     set -Eeu
@@ -54,8 +55,18 @@ let
         pkgs.findutils
         pkgs.systemd
         pkgs.curl
+        pkgs.util-linux
       ]
     }:$PATH
+
+    # The timer and the update tiles must not run at the same time. The timer
+    # steps aside, a tile waits.
+    exec 8>/run/nixbook-upgrade.lock
+    if [ "''${1:-}" = "--if-due" ]; then
+      flock -n 8 || exit 0
+    else
+      flock 8
+    fi
 
     # online is 1 on mains. No power supply at all means a desktop.
     on_ac() {
@@ -89,11 +100,22 @@ let
       fi
     }
 
+    # nixos-rebuild moves the profile before it installs the boot loader. If
+    # that fails nothing new can boot, so drop the generation again.
+    restore_profile() {
+      local now
+      now=$(readlink ${systemProfile})
+      [ "$now" != "$1" ] || return 0
+      ln -sfn "$1" ${systemProfile}
+      rm -f "$(dirname ${systemProfile})/$now"
+    }
+
     # try_update [input...]: update these inputs (all without any) and build
     # the system for the next boot. Puts the old lock back if that fails.
     # Called from `if`, so set -e is off in here and every step is checked.
     try_update() {
-      local committed=0
+      local committed=0 profile
+      profile=$(readlink ${systemProfile})
       if ! nix flake update --flake ${flakeDir} "$@"; then
         git_nixbook checkout -- flake.lock || true
         return 1
@@ -107,6 +129,7 @@ let
         committed=1
       fi
       if ! nixos-rebuild boot --flake ${flakeDir}#nixbook; then
+        restore_profile "$profile"
         if [ "$committed" = 1 ]; then
           git_nixbook revert --no-edit HEAD || true
         else
@@ -139,6 +162,10 @@ let
         echo "On battery, trying again later."
         exit 0
       fi
+      if ${metered}; then
+        echo "On a metered network, trying again later."
+        exit 0
+      fi
       # NetworkManager-wait-online is disabled, so wait up to 5 min ourselves
       online=0
       for _ in $(seq 30); do
@@ -168,7 +195,11 @@ let
     fi
     trap - ERR
     rm -f "$failStamp"
-    ${collectGarbage}
+    # Neither of these is a reason to run the whole update again.
+    ${collectGarbage} || true
+    # Take the generations that were just removed out of the boot menu, their
+    # entries can't start anymore.
+    ${systemProfile}/bin/switch-to-configuration boot || true
     mkdir -p "$(dirname ${stampFile})"
     touch ${stampFile}
     ${notifyUsers} "Updates klaar" "$done_msg"
@@ -182,6 +213,10 @@ let
 
   # Running apps keep the old version until restarted, so tell the user.
   flatpakSystemUpdate = ''
+    if ${metered}; then
+      echo "On a metered network, trying again later."
+      exit 0
+    fi
     apps() { ${pkgs.flatpak}/bin/flatpak list --system --app --columns=application,active,name | sort; }
     before=$(apps)
     ${flatpakUpdate "--system"}
@@ -240,11 +275,31 @@ let
   rebootReminder = pkgs.writeShellScript "nixbook-reboot-reminder" ''
     set -eu
     booted=$(readlink -f /run/booted-system)
-    latest=$(readlink -f /nix/var/nix/profiles/system)
+    latest=$(readlink -f ${systemProfile})
     [ "$booted" != "$latest" ] || exit 0
-    age=$(( $(date +%s) - $(stat -c %Y /nix/var/nix/profiles/system) ))
+    # Out of boot tries: systemd-boot went back to an older generation and a
+    # reboot won't help. The next update gets three new tries.
+    gen=$(readlink ${systemProfile})
+    gen=''${gen#system-}
+    gen=''${gen%-link}
+    for entry in /boot/EFI/Linux/nixos-generation-"$gen"-*+0-*.efi; do
+      if [ -e "$entry" ]; then
+        echo "Generation $gen is out of boot tries."
+        ${notifyUsers} "Update startte niet" "De laatste update startte niet op, daarom draait de vorige versie nog. Je kunt gewoon doorwerken, de volgende update probeert het opnieuw."
+        exit 0
+      fi
+    done
+    age=$(( $(date +%s) - $(stat -c %Y ${systemProfile}) ))
     [ "$age" -ge $((3 * 86400)) ] || exit 0
     ${notifyUsers} "Herstart nodig" "Er staat al $((age / 86400)) dagen een update klaar. Herstart om de beveiligingsupdates te gebruiken."
+  '';
+
+  # One sudo for both: a long build outlasts its timeout, and the tile would
+  # then sit at a password prompt with nobody watching.
+  updateAsRoot = pkgs.writeShellScript "nixbook-update-root" ''
+    ${upgrade} || exit 1
+    echo "Firmware bijwerken (BIOS en apparaten, via LVFS)..."
+    ${firmwareUpdate} || exit 2
   '';
 
   # "update now" tiles, like nixbook's update.sh / update_shutdown.sh
@@ -254,10 +309,14 @@ let
     read -r -p "Doorgaan? (j/n): " answer
     case "$answer" in
       [jJyY]*)
-        sudo ${upgrade} || { echo "Update mislukt. Druk op Enter."; read -r; exit 1; }
+        rc=0
+        sudo ${updateAsRoot} || rc=$?
+        case "$rc" in
+          0) ;;
+          2) echo "Firmware-update mislukt; het systeem is wel bijgewerkt. Druk op Enter."; read -r ;;
+          *) echo "Update mislukt. Druk op Enter."; read -r; exit 1 ;;
+        esac
         flatpak update -y --noninteractive
-        echo "Firmware bijwerken (BIOS en apparaten, via LVFS)..."
-        sudo ${firmwareUpdate} || { echo "Firmware-update mislukt; het systeem is wel bijgewerkt. Druk op Enter."; read -r; }
         systemctl "$action"
         ;;
       *) echo "Update geannuleerd." ;;
@@ -300,6 +359,8 @@ in
       CPUWeight = 20;
       IOWeight = 20;
       Nice = 19;
+      # a stuck download would otherwise block every later update
+      TimeoutStartSec = "3h";
     };
     script = "${upgrade} --if-due";
     after = [ "network-online.target" ];
@@ -364,6 +425,7 @@ in
       Nice = 19;
       Restart = "on-failure";
       RestartSec = "15min";
+      TimeoutStartSec = "1h";
     };
     unitConfig.StartLimitIntervalSec = 0;
     script = flatpakSystemUpdate;
@@ -389,7 +451,12 @@ in
   systemd.user.services.nixbook-flatpak-update = {
     description = "Update Flatpak apps installed for this user";
     serviceConfig.Type = "oneshot";
-    script = flatpakUpdate "--user";
+    script = ''
+      if ${metered}; then
+        exit 0
+      fi
+      ${flatpakUpdate "--user"}
+    '';
   };
   systemd.user.timers.nixbook-flatpak-update = {
     wantedBy = [ "timers.target" ];

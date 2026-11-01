@@ -17,7 +17,7 @@ summary [at the bottom](#nederlands).
 | | Chromebook | Plain NixOS | nixbook-elite |
 |---|---|---|---|
 | Updates without thinking about them | yes | no | yes, applied on the next boot |
-| Go back after a bad update | partly | yes | yes, the last 8 generations stay bootable |
+| Go back after a bad update | partly | yes | yes, by itself after 3 failed boots, and the last 8 generations stay bootable |
 | Whole system in one versioned config | no | yes | yes, `/etc/nixos` is a git repo |
 | App store | yes | no | Flathub through Bazaar |
 | Terminal, containers, VMs | limited | yes | yes |
@@ -97,14 +97,26 @@ starts as Amsterdam and can be changed in Settings > Date & Time.
 ### Updates
 
 - A timer checks a few times a day whether an update is due: at least 6 days
-  since the last one, on AC power and online. If so it updates the flake
+  since the last one, on AC power, online and not on a metered network like a
+  phone's hotspot. If so it updates the flake
   inputs, commits `flake.lock` and builds the new system in the background. It
   becomes active after the next reboot.
 - If the build fails, the old lock is put back. If nixos-unstable was the
   problem, the stable NixOS updates (with the security fixes) are still
   installed and the rest is tried again next time. If nothing can be
   updated, you get one notification a day while it keeps failing.
-- Flatpaks (also the ones installed with Bazaar) update every 4 hours. If an
+- With Secure Boot on, nothing goes on the boot partition unless the signing
+  key is there and is the one in the firmware. Afterwards every boot file is
+  checked against that key. If either check fails the update counts as failed
+  and the current boot entries stay.
+- A new generation gets three tries to reach the login screen, and a kernel
+  panic restarts the laptop after 10 seconds. After the third try systemd-boot
+  starts the previous generation by itself and you get a notification. If a
+  boot hangs without restarting, hold the power button; it counts as a try. The
+  disk prompt counts too: turn the laptop off there three times and it goes
+  back to the previous generation until the next update.
+- Flatpaks (also the ones installed with Bazaar) update every 4 hours, unless
+  the network is metered. If an
   app you have open got updated, a notification asks you to restart it.
 - Old generations are garbage collected depending on free disk space.
 - The *Bijwerken en herstarten* and *Bijwerken en afsluiten* tiles update
@@ -117,11 +129,27 @@ starts as Amsterdam and can be changed in Settings > Date & Time.
 ### Backups
 
 - Daily read-only btrfs snapshots of `/` (7 kept) and `/home` (14 kept) in
-  `/.snapshots`.
+  `/.snapshots`. Only 3 of each are kept when the disk has less than 16 GB free.
 - Plug in a disk labelled `NIXBACKUP` (ext4 or btrfs) and `/home` gets backed
-  up to it with restic every hour (14 daily, 8 weekly, 12 monthly).
-- `sudo nixbook-backup-recovery /path/on/usb` copies the Secure Boot keys and a
-  LUKS header backup off the laptop.
+  up to it with restic every hour (14 daily, 8 weekly, 12 monthly). It backs up
+  a snapshot, so open databases come back whole. Once a week a sample is read
+  back to check that the backup can be restored.
+- You get a notification when a backup, snapshot or SSD check fails, and when
+  the last backup is more than 14 days old.
+- `sudo nixbook-backup-recovery /path/on/usb` copies the Secure Boot keys, a
+  LUKS header backup and the restic password off the laptop. Without that
+  password the backup can't be restored, so run this again after the first
+  backup. These files aren't encrypted, so keep the stick somewhere safe.
+
+To restore, plug in the backup disk (GNOME mounts it) and use the password from
+the recovery stick:
+
+```sh
+sudo restic -r /run/media/$USER/NIXBACKUP/restic -p /path/to/restic-password \
+  restore latest --target ~/restored
+```
+
+The files end up in `~/restored/.snapshots/backup-home/`.
 
 ### VMs and development
 
@@ -183,7 +211,8 @@ You need the EliteBook, a USB stick of 8 GB or more, and a machine with Nix
 | `nixbook-update [reboot\|poweroff]` | update system, apps and firmware now, then reboot or shut down (same as the two tiles) |
 | `nixbook-secureboot` | whose Secure Boot keys are in the firmware and what to do next |
 | `sudo nixbook-enroll` | enroll the keys by hand (firmware has to be in Setup Mode) |
-| `sudo nixbook-backup-recovery DIR` | copy the Secure Boot keys and LUKS header backup to `DIR` |
+| `sudo nixbook-check-boot` | check that the signing key is the enrolled one and that the firmware will accept every boot file |
+| `sudo nixbook-backup-recovery DIR` | copy the Secure Boot keys, LUKS header backup and restic password to `DIR` |
 | `sudo nixbook-backup-home` | back up `/home` to the `NIXBACKUP` disk now |
 | `journalctl -u nixbook-upgrade` | why an automatic update failed |
 
@@ -253,7 +282,11 @@ Then it goes through the installed system: accounts and groups (also an admin
 created the way GNOME Settings does it), rootless containers, the disk layout,
 zram, fonts, PAM, NetworkManager settings, firmware check, time zone,
 hostname, security settings and apps. It fails if any unit failed, except the
-Flathub install, which can't work without internet.
+Flathub install, which can't work without internet. Last come the boot checks,
+with Secure Boot on: a rebuild has to stop with the keys missing or swapped,
+without touching the boot partition, and a damaged boot file has to be noticed.
+A new generation has to count as good only after the login screen, and one
+that's out of tries has to be skipped.
 
 Most of this is generic NixOS. The EliteBook-specific parts are the disk
 (`/dev/nvme0n1`), `hardware.nix` and the HP Secure Boot hints.
@@ -307,12 +340,15 @@ zit gewoon NixOS, met terminal, containers en virtuele machines.
   BIOS (*Clear Secure Boot keys*).
 - **Updates:** gaan op de achtergrond (aan de lader, met internet) en zijn
   actief na een herstart. Mislukt er een, dan krijg je een melding en blijft
-  alles zoals het was. Meteen bijwerken kan met de tegels *Bijwerken en
-  herstarten* en *Bijwerken en afsluiten*, die ook firmware bijwerken.
+  alles zoals het was. Start een nieuwe versie drie keer niet op, dan gaat de
+  laptop vanzelf terug naar de vorige en krijg je een melding. Meteen bijwerken
+  kan met de tegels *Bijwerken en herstarten* en *Bijwerken en afsluiten*, die
+  ook firmware bijwerken.
 - **Back-ups:** dagelijks snapshots op de SSD. Steek een schijf met het label
-  `NIXBACKUP` in en `/home` gaat er elk uur naartoe. Zet de Secure
-  Boot-sleutels en de LUKS-header op een USB-stick met
-  `sudo nixbook-backup-recovery /pad/op/stick`.
+  `NIXBACKUP` in en `/home` gaat er elk uur naartoe. Mislukt er iets of is de
+  laatste back-up te oud, dan krijg je een melding. Zet de Secure
+  Boot-sleutels, de LUKS-header en het back-upwachtwoord op een USB-stick met
+  `sudo nixbook-backup-recovery /pad/op/stick`, ook na de eerste back-up.
 - **Privacy:** alleen wifi (de netwerkkabel wordt niet gebruikt), een
   willekeurig MAC-adres per wifi-netwerk, een willekeurige Windows-achtige
   computernaam, geen telemetrie en geen DNS-terugval naar Google of Cloudflare.

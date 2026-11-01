@@ -17,19 +17,31 @@ let
       echo "Voorbeeld: een USB-stick. De kopie op deze schijf helpt niet als de SSD stuk gaat."
       exit 1
     }
-    mkdir -p ${store} "$dest"
-    chmod 700 ${store} "$dest"
-    rm -rf ${store}/sbctl "$dest/sbctl"
-    # USB sticks are usually FAT, cp -a fails on ownership there
+    # USB sticks are usually FAT. cp -a fails on ownership there, and FAT
+    # refuses a chmod it can't store.
     copy() { cp -r --preserve=mode,timestamps "$@"; }
+    private() { chmod "$@" 2>/dev/null || true; }
+    mkdir -p ${store} "$dest"
+    chmod 700 ${store}
+    private 700 "$dest"
+    rm -rf ${store}/sbctl
     cp -a /var/lib/sbctl ${store}/sbctl
-    copy /var/lib/sbctl "$dest/sbctl"
+    # the old copy goes only once the new one is complete
+    rm -rf "$dest/sbctl.new"
+    copy /var/lib/sbctl "$dest/sbctl.new"
+    rm -rf "$dest/sbctl"
+    mv "$dest/sbctl.new" "$dest/sbctl"
     # luksHeaderBackup won't overwrite, and this is meant to be rerun
     rm -f ${store}/luks-header.bin
     ${pkgs.cryptsetup}/bin/cryptsetup luksHeaderBackup ${disk} \
       --header-backup-file ${store}/luks-header.bin
     copy ${store}/luks-header.bin "$dest/luks-header.bin"
-    chmod -R go-rwx ${store} "$dest"
+    # made by the first nixbook-backup-home
+    if [ -s ${store}/restic-password ]; then
+      copy ${store}/restic-password "$dest/restic-password"
+    fi
+    chmod -R go-rwx ${store}
+    private -R go-rwx "$dest"
     cat > ${store}/README.txt <<'EOF'
     nixbook-recovery
 
@@ -37,6 +49,9 @@ let
                       nieuwe generatie niet getekend worden.
     luks-header.bin   Reservekopie van de LUKS-header. De wachtzin opent
                       niets als de header op de SSD kapot is.
+    restic-password   Wachtwoord van de back-up op de NIXBACKUP-schijf. Zonder
+                      dit bestand is die back-up niet terug te zetten. Staat
+                      er alleen als er al een back-up is gemaakt.
 
     Bewaar deze map op een andere schijf, niet alleen op deze laptop.
     De schijf gaat open met de lange wachtzin. Er is geen PIN.
@@ -44,7 +59,10 @@ let
     Voor een herinstallatie: F10, Secure Boot uit, van de stick starten.
     EOF
     copy ${store}/README.txt "$dest/README.txt"
-    chmod 600 ${store}/README.txt "$dest/README.txt"
+    chmod 600 ${store}/README.txt
+    private 600 "$dest/README.txt"
+    # a stick can be pulled out as soon as this says it's done
+    sync
     echo "Klaar: ${store} en $dest"
     echo "Haal de andere schijf uit de laptop en leg hem apart."
   '';

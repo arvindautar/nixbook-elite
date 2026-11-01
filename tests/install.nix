@@ -11,22 +11,48 @@
 
 let
   # the real system plus the test backdoor
+  instrumented =
+    { modulesPath, pkgs, ... }:
+    {
+      imports = [ "${modulesPath}/testing/test-instrumentation.nix" ];
+      # lsattr, for the No_COW check on the libvirt subvolume; openssl to
+      # make a key pair the firmware doesn't know; dosfstools for a USB stick
+      environment.systemPackages = [
+        pkgs.e2fsprogs
+        pkgs.openssl
+        pkgs.dosfstools
+      ];
+      boot.initrd.availableKernelModules = [ "virtio_console" ];
+      # LUKS prompt on the serial console so the test can answer it
+      boot.plymouth.enable = lib.mkForce false;
+      # no network here, don't keep retrying Flathub
+      systemd.services.flatpak-managed-install.serviceConfig.Restart = lib.mkForce "no";
+      systemd.user.services.nixbook-gradia-capture.serviceConfig.Restart = lib.mkForce "no";
+    };
+
+  # What an update would install. Nix makes no new generation for a system
+  # that hasn't changed, so these differ by one file. They're on the disk from
+  # the start because the laptop has no network here.
+  update =
+    n:
+    (nixbook.extendModules {
+      modules = [
+        instrumented
+        { environment.etc.nixbook-test-update.text = n; }
+      ];
+    }).config.system.build.toplevel;
+  update1 = update "1";
+  update2 = update "2";
+
   target = nixbook.extendModules {
     modules = [
-      (
-        { modulesPath, pkgs, ... }:
-        {
-          imports = [ "${modulesPath}/testing/test-instrumentation.nix" ];
-          # lsattr, for the No_COW check on the libvirt subvolume
-          environment.systemPackages = [ pkgs.e2fsprogs ];
-          boot.initrd.availableKernelModules = [ "virtio_console" ];
-          # LUKS prompt on the serial console so the test can answer it
-          boot.plymouth.enable = lib.mkForce false;
-          # no network here, don't keep retrying Flathub
-          systemd.services.flatpak-managed-install.serviceConfig.Restart = lib.mkForce "no";
-          systemd.user.services.nixbook-gradia-capture.serviceConfig.Restart = lib.mkForce "no";
-        }
-      )
+      instrumented
+      {
+        system.extraDependencies = [
+          update1
+          update2
+        ];
+      }
     ];
   };
 
@@ -324,7 +350,8 @@ pkgs.testers.runNixOSTest {
         laptop.succeed("systemctl start nixbook-firmware-check.service")
         laptop.succeed("test ! -e /var/lib/nixbook-upgrade/firmware-notified")
         tile = laptop.succeed("readlink -f $(command -v nixbook-update)").strip()
-        fw = laptop.succeed(f"grep -o '/nix/store/[a-z0-9]*-nixbook-firmware-update' {tile} | head -1").strip()
+        root = laptop.succeed(f"grep -o '/nix/store/[a-z0-9]*-nixbook-update-root' {tile} | head -1").strip()
+        fw = laptop.succeed(f"grep -o '/nix/store/[a-z0-9]*-nixbook-firmware-update' {root} | head -1").strip()
         laptop.succeed(f"grep -q -- '--no-unreported-check' {fw}")
         # nothing to update counts as success
         laptop.succeed(fw)
@@ -450,6 +477,132 @@ pkgs.testers.runNixOSTest {
         assert failed <= {"flatpak-managed-install.service"}, failed
         print(laptop.succeed("systemd-analyze || true"))
         print(laptop.succeed("systemd-analyze blame | head -15 || true"))
+
+    with subtest("backups can be read back, and a lost password doesn't make a new one"):
+        pw = "/root/nixbook-recovery/restic-password"
+        snap = "/.snapshots/backup-home"
+        laptop.succeed(
+            "truncate -s 512M /root/backup.img",
+            "mkfs.ext4 -q -L NIXBACKUP $(losetup -f --show /root/backup.img)",
+            "echo first > /home/alice/marker",
+        )
+        print(laptop.succeed("nixbook-backup-home 2>&1"))
+        laptop.succeed("echo second > /home/alice/marker")
+        # the second run has to find the first, or every hour is a full backup
+        second = laptop.succeed("nixbook-backup-home 2>&1")
+        print(second)
+        assert "using parent snapshot" in second, second
+        laptop.fail(f"test -e {snap}")
+        laptop.fail("findmnt /mnt/nixbackup")
+        laptop.succeed("mkdir -p /mnt/check && mount -L NIXBACKUP /mnt/check")
+        assert laptop.succeed(
+            f"RESTIC_PASSWORD_FILE={pw} restic -r /mnt/check/restic dump latest {snap}/alice/marker"
+        ).strip() == "second"
+        laptop.succeed("umount /mnt/check")
+        laptop.succeed(f"mv {pw} {pw}.orig")
+        laptop.fail("systemctl start nixbook-backup-home.service")
+        laptop.fail(f"test -e {pw}")
+        laptop.wait_until_succeeds(
+            "journalctl -u 'nixbook-task-failed@*' | grep -q 'Finished\\|Deactivated'"
+        )
+        laptop.succeed(f"mv {pw}.orig {pw}")
+        laptop.succeed("systemctl reset-failed")
+        laptop.succeed("systemctl start nixbook-backup-home.service")
+
+    with subtest("recovery copy works on a FAT stick, password included"):
+        laptop.succeed(
+            "truncate -s 64M /root/stick.img",
+            "mkfs.vfat -n STICK $(losetup -f --show /root/stick.img)",
+            "mkdir -p /mnt/stick",
+            "mount -o fmask=0022,dmask=0022 $(losetup -j /root/stick.img | cut -d: -f1) /mnt/stick",
+        )
+        print(laptop.succeed("nixbook-backup-recovery /mnt/stick/keys 2>&1"))
+        # rerunning replaces the copy
+        laptop.succeed("nixbook-backup-recovery /mnt/stick/keys 2>&1")
+        laptop.succeed(f"cmp {pw} /mnt/stick/keys/restic-password")
+        laptop.succeed("cmp /var/lib/sbctl/keys/db/db.key /mnt/stick/keys/sbctl/keys/db/db.key")
+        laptop.succeed("test -s /mnt/stick/keys/luks-header.bin")
+        laptop.fail("test -e /mnt/stick/keys/sbctl.new")
+        laptop.succeed("umount /mnt/stick")
+
+    # What nixos-rebuild does after building
+    def new_generation(system):
+        laptop.succeed(f"nix-env -p /nix/var/nix/profiles/system --set {system}")
+        return f"{system}/bin/switch-to-configuration boot 2>&1"
+
+    def running():
+        return laptop.succeed("readlink -f /run/booted-system").strip()
+
+    def reboot():
+        laptop.shutdown()
+        laptop.start(allow_reboot=True)
+        unlock()
+        laptop.wait_for_unit("multi-user.target")
+
+    def entries():
+        return laptop.succeed("ls /boot/EFI/Linux").split()
+
+    def booted_entry():
+        return laptop.succeed("bootctl status 2>/dev/null | sed -n 's/^ *Current Entry: //p'").strip()
+
+    with subtest("nothing that Secure Boot would refuse reaches the ESP"):
+        print(laptop.succeed("nixbook-check-boot"))
+        before = laptop.succeed("sha256sum /boot/EFI/Linux/* /boot/EFI/BOOT/BOOTX64.EFI")
+        keys = "/var/lib/sbctl/keys"
+        install = new_generation("${update1}")
+        # lzbt on its own would install unsigned files here
+        laptop.succeed(f"mv {keys} {keys}.orig")
+        laptop.fail(install)
+        laptop.succeed(f"mv {keys}.orig {keys}")
+        # a different key pair, as the first-boot service would generate
+        laptop.succeed(f"cp -a {keys} {keys}.orig")
+        laptop.succeed(
+            "openssl req -x509 -newkey rsa:2048 -nodes -subj /CN=other -days 1 "
+            f"-keyout {keys}/db/db.key -out {keys}/db/db.pem 2>&1"
+        )
+        laptop.fail(install)
+        laptop.succeed(f"rm -rf {keys} && mv {keys}.orig {keys}")
+        assert laptop.succeed("sha256sum /boot/EFI/Linux/* /boot/EFI/BOOT/BOOTX64.EFI") == before
+        laptop.succeed("nix-env -p /nix/var/nix/profiles/system --switch-generation 1")
+        laptop.succeed("nix-env -p /nix/var/nix/profiles/system --delete-generations 2")
+
+    with subtest("a damaged boot file is noticed"):
+        for f in ["/boot/EFI/Linux/" + entries()[0], "$(ls /boot/EFI/nixos/kernel-*.efi | head -1)"]:
+            laptop.succeed(f"cp {f} /run/original")
+            laptop.succeed(f"printf x | dd of={f} bs=1 seek=4096 conv=notrunc")
+            laptop.fail("nixbook-check-boot files")
+            laptop.succeed(f"cp /run/original {f}")
+        laptop.succeed("nixbook-check-boot files")
+
+    with subtest("a new generation gets three tries and counts as good at the login screen"):
+        print(laptop.succeed(new_generation("${update1}")))
+        laptop.succeed("test -e /boot/EFI/Linux/nixos-generation-2-*+3.efi")
+        laptop.succeed("nixbook-check-boot")
+        reboot()
+        laptop.wait_for_unit("systemd-bless-boot.service")
+        assert booted_entry().startswith("nixos-generation-2-"), booted_entry()
+        assert running() == "${update1}", running()
+        # blessed, so it's a plain entry that keeps working
+        laptop.succeed("test -e /boot/EFI/Linux/nixos-generation-2-*[a-z0-9].efi")
+        laptop.fail("ls /boot/EFI/Linux/*+*")
+        stamp = lambda unit: int(laptop.succeed(
+            f"systemctl show -P ActiveEnterTimestampMonotonic {unit}"
+        ))
+        assert stamp("display-manager.service") <= stamp("systemd-bless-boot.service")
+
+    with subtest("a generation that's out of tries is skipped"):
+        print(laptop.succeed(new_generation("${update2}")))
+        # lanzaboote's own test covers the counting down
+        laptop.succeed(
+            "cd /boot/EFI/Linux; f=$(ls nixos-generation-3-*+3.efi); mv $f ''${f%+3.efi}+0-3.efi"
+        )
+        reboot()
+        assert booted_entry().startswith("nixos-generation-2-"), booted_entry()
+        assert running() == "${update1}", running()
+        laptop.succeed("bootctl status 2>&1 | grep -E 'Secure Boot: enabled \\(user\\)'")
+        # the reminder says what happened instead of asking for a reboot
+        laptop.succeed("systemctl start nixbook-reboot-reminder.service")
+        laptop.succeed("journalctl -u nixbook-reboot-reminder | grep -q 'Generation 3 is out of boot tries'")
         laptop.shutdown()
   '';
 }

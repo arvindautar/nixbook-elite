@@ -1,7 +1,100 @@
 # Secure Boot (lanzaboote), LTS kernel, systemd initrd, quiet boot
-{ pkgs, lib, ... }:
+{
+  pkgs,
+  lib,
+  inputs,
+  ...
+}:
 
 let
+  # nixbook-check-boot [keys|files]: will the firmware start what's on the ESP?
+  # lzbt can't tell. autoGenerateKeys makes it install unsigned files when the
+  # keys are gone, and a new key pair would make it re-sign the whole ESP.
+  # Either way every generation and systemd-boot get replaced by files that
+  # Secure Boot refuses, so nothing is left to fall back on.
+  bootCheck = pkgs.writeShellScriptBin "nixbook-check-boot" ''
+    set -u
+    [ "$(${pkgs.coreutils}/bin/id -u)" = 0 ] || exec sudo "$0" "$@"
+    export PATH=${
+      lib.makeBinPath [
+        pkgs.coreutils
+        pkgs.openssl
+        pkgs.sbsigntool
+      ]
+    }
+    cert=/var/lib/sbctl/keys/db/db.pem
+    key=/var/lib/sbctl/keys/db/db.key
+    secureboot=/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c
+    db=/sys/firmware/efi/efivars/db-d719b2cb-3d3a-4596-a3bc-dad00e67656f
+    hex() { od -An -v -t x1 | tr -d ' \n'; }
+
+    # Without Secure Boot anything starts, and the keys may not exist yet
+    # (installing, first boot).
+    if [ ! -e "$secureboot" ] || [ "$(od -An -t u1 -j4 -N1 "$secureboot" | tr -d ' ')" != 1 ]; then
+      echo "Secure Boot staat uit, niets te controleren."
+      exit 0
+    fi
+
+    failed=0
+    bad() {
+      echo "FOUT: $1"
+      failed=1
+    }
+
+    check_keys() {
+      if [ ! -s "$cert" ] || [ ! -s "$key" ]; then
+        bad "de Secure Boot-sleutels ontbreken in /var/lib/sbctl; zet ze terug van je reservekopie"
+        return
+      fi
+      case "$(hex < "$db")" in
+        *"$(openssl x509 -in "$cert" -outform DER | hex)"*) ;;
+        *) bad "de sleutel in /var/lib/sbctl staat niet in de firmware; zet de juiste terug van je reservekopie" ;;
+      esac
+    }
+
+    check_files() {
+      local f hash link gen
+      for f in /boot/EFI/BOOT/BOOTX64.EFI /boot/EFI/systemd/systemd-bootx64.efi /boot/EFI/Linux/nixos-*.efi; do
+        sbverify --cert "$cert" "$f" > /dev/null 2>&1 || bad "$f is niet goed ondertekend"
+      done
+      # kernels and initrds aren't signed, the signed stub holds their hash
+      for f in /boot/EFI/nixos/kernel-*.efi /boot/EFI/nixos/initrd-*.efi; do
+        hash=$(openssl dgst -sha256 -binary "$f" | base32 | tr -d = | tr '[:upper:]' '[:lower:]')
+        [ "$f" != "''${f%-"$hash".efi}" ] || bad "$f is beschadigd"
+      done
+      link=$(readlink /nix/var/nix/profiles/system)
+      gen=''${link#system-}
+      gen=''${gen%-link}
+      for f in /boot/EFI/Linux/nixos-generation-"$gen"-*.efi; do
+        [ -e "$f" ] || bad "generatie $gen staat niet op de ESP"
+      done
+    }
+
+    case "''${1:-all}" in
+      keys) check_keys ;;
+      files) check_files ;;
+      all)
+        check_keys
+        [ "$failed" = 1 ] || check_files
+        ;;
+      *)
+        echo "Gebruik: nixbook-check-boot [keys|files]"
+        exit 1
+        ;;
+    esac
+    [ "$failed" = 0 ] || exit 1
+    echo "Secure Boot: de sleutels en de opstartbestanden zijn in orde."
+  '';
+
+  # The one place everything that writes to the ESP goes through. A rebuild
+  # that fails here keeps the current boot entries.
+  lzbt = pkgs.writeShellScriptBin "lzbt" ''
+    set -e
+    ${bootCheck}/bin/nixbook-check-boot keys
+    ${inputs.lanzaboote.packages.${pkgs.stdenv.hostPlatform.system}.lzbt}/bin/lzbt "$@"
+    ${bootCheck}/bin/nixbook-check-boot files
+  '';
+
   # nixbook-secureboot shows whose keys are in the firmware and what to do next.
   # HP Sure Start puts the factory keys back after enrollment, so it has to be
   # off first. nixbook-enroll is the manual fallback for lanzaboote's
@@ -109,6 +202,7 @@ in
   environment.systemPackages = [
     secureBootTool
     enroll
+    bootCheck
   ];
 
   # 6.18 LTS, pinned so a nixpkgs bump doesn't switch kernels
@@ -120,8 +214,12 @@ in
   boot.loader.systemd-boot.enable = lib.mkForce false;
   boot.lanzaboote = {
     enable = true;
+    package = lzbt;
     pkiBundle = "/var/lib/sbctl";
     configurationLimit = 8;
+    # A new generation gets 3 tries to reach the login screen. After that
+    # systemd-boot moves on to the previous one by itself.
+    bootCounting.initialTries = 3;
     autoGenerateKeys.enable = true;
     autoEnrollKeys = {
       enable = true;
@@ -133,6 +231,20 @@ in
   boot.loader.efi.canTouchEfiVariables = true;
   # no menu, hold space to get it
   boot.loader.timeout = 0;
+
+  # By default a boot counts as good right after sysinit, long before anything
+  # that could be broken has run. Wait for the login screen.
+  systemd.services.nixbook-boot-good = {
+    description = "Check that the login screen came up";
+    requiredBy = [ "boot-complete.target" ];
+    before = [ "boot-complete.target" ];
+    after = [ "display-manager.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = "${pkgs.systemd}/bin/systemctl is-active --quiet display-manager.service";
+    };
+  };
 
   boot.initrd.systemd.enable = true;
 
@@ -146,6 +258,8 @@ in
     "rd.systemd.show_status=false"
     "rd.udev.log_level=3"
     "udev.log_level=3"
+    # restart instead of hanging forever, so a panic uses up a boot try
+    "panic=10"
   ];
 
   boot.tmp = {

@@ -80,7 +80,7 @@ pkgs.testers.runNixOSTest {
         """Get IPv4 and DHCPv6 leases, return what each protocol sent as text."""
         pcap = f"/tmp/{name}.pcap"
         router.succeed(
-            f"systemd-run --unit=capture-{name} tcpdump -Z root -U -ni eth1 -w {pcap} "
+            f"systemd-run --unit=capture-{name} tcpdump -Z root -U --immediate-mode -ni eth1 -w {pcap} "
             "udp port 67 or udp port 68 or udp port 546 or udp port 547"
         )
         router.wait_until_succeeds(f"journalctl -u capture-{name} | grep -q 'listening on'")

@@ -18,6 +18,10 @@
       trusted-users = [ "root" ];
       max-jobs = "auto";
       download-buffer-size = 268435456;
+      # Clean up during a build rather than fail on a full disk. updates.nix
+      # only collects garbage after an update that worked.
+      min-free = 5368709120; # 5 GiB
+      max-free = 21474836480; # 20 GiB
     };
     # dedupe weekly instead of on every build
     optimise = {
