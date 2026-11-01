@@ -40,6 +40,28 @@ ask_secret() { # prompt, var, minlen
   done
 }
 
+# disko keeps whatever it can reuse: with a LUKS header this passphrase opens
+# it skips luksFormat and mkfs, and nixos-install ends up in the old, possibly
+# damaged store. Its own wipe only reaches partitions that are in the table,
+# and a TRIM clears the rest of the disk.
+clear_disk() {
+  if mountpoint -q /mnt; then
+    umount -R /mnt || die "/mnt is nog in gebruik. Herstart en probeer opnieuw."
+  fi
+  if [ -e /dev/mapper/cryptroot ]; then
+    cryptsetup close cryptroot || die "cryptroot is nog in gebruik. Herstart en probeer opnieuw."
+  fi
+  local part
+  for part in "$DISK"p*; do
+    [ -b "$part" ] || continue
+    wipefs -a -f "$part" > /dev/null
+    # the LUKS2 headers and any filesystem starting behind them
+    dd if=/dev/zero of="$part" bs=1M count=32 conv=fsync status=none || true
+  done
+  wipefs -a -f "$DISK" > /dev/null
+  blkdiscard -f "$DISK" || echo "TRIM niet gelukt, de installatie gaat door."
+}
+
 bold "nixbook-elite installatie"
 lsblk -d -o NAME,SIZE,MODEL "$DISK"
 echo
@@ -82,23 +104,25 @@ done
 # HP Sure Start puts the factory keys back after enrollment unless this is off
 sb_protect=$(cat "/sys/class/firmware-attributes/hp-bioscfg/attributes/Sure Start Secure Boot Keys Protection/current_value" 2>/dev/null || true)
 
-bold "1/4 Partitioneren en versleutelen (LUKS2 + btrfs)"
+bold "1/5 Partitioneren en versleutelen (LUKS2 + btrfs)"
+clear_disk
 (umask 077 && printf '%s' "$NB_LUKS" > "$KEYFILE")
 trap 'rm -f "$KEYFILE"' EXIT
 "$DISKO"
 rm -f "$KEYFILE"
+[ -z "$(ls -A /mnt/nix)" ] || die "Er staat nog een oude installatie op $DISK. Wis de schijf met 'sudo blkdiscard -f $DISK' en probeer opnieuw."
 
-bold "2/4 Systeem installeren (offline)"
+bold "2/5 Systeem installeren (offline)"
 nixos-install --system "$TOPLEVEL" --no-root-passwd --no-channel-copy
 
-bold "3/4 Gebruiker aanmaken"
+bold "3/5 Gebruiker aanmaken"
 # admin with all the extra groups, accounts.nix adds subuid ranges on first boot
 printf -v account_command 'useradd -m -u 1000 -c %q -G wheel,networkmanager,libvirtd,nordvpn,video,audio %q' \
   "${NB_FULLNAME:-$NB_USER}" "$NB_USER"
 nixos-enter --root /mnt -c "$account_command"
 printf '%s:%s\n' "$NB_USER" "$NB_PASSWORD" | nixos-enter --root /mnt -c chpasswd
 
-bold "4/4 Configuratie naar /etc/nixos kopiëren"
+bold "4/5 Configuratie naar /etc/nixos kopiëren"
 # DESKTOP- plus 7 random characters, like a fresh Windows install. The flake
 # sets no hostname, so NixOS leaves this file alone, and hostnamed reads it.
 chars=ABCDEFGHJKLMNPQRSTUVWXYZ0123456789
@@ -109,6 +133,12 @@ mkdir -p /mnt/etc/nixos
 cp -rT "$FLAKE_SRC" /mnt/etc/nixos
 chmod -R u+w /mnt/etc/nixos
 sync
+
+bold "5/5 Controleren wat er op de schijf staat"
+# Reads everything back from the SSD, past the page cache. A disk that loses
+# data has to fail here, not on the first boot.
+btrfs scrub start -B /mnt || die "De schijf gaf andere gegevens terug dan er zijn geschreven. Controleer de SSD (smartctl) en het geheugen voordat je opnieuw installeert."
+btrfs device stats --check /mnt > /dev/null || die "btrfs meldt schijffouten. Controleer de SSD (smartctl) en het geheugen voordat je opnieuw installeert."
 
 bold "Klaar!"
 cat <<EOF

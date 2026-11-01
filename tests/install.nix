@@ -86,10 +86,13 @@ pkgs.testers.runNixOSTest {
           "-device nvme,serial=nixbook0,drive=nvm"
         ];
       };
-      # to read the LUKS header back; disko's copy isn't on PATH after the install
+      # to read the LUKS header back and set up an earlier install; disko's
+      # copies aren't on PATH
       environment.systemPackages = [
         installScript
         pkgs.cryptsetup
+        pkgs.btrfs-progs
+        pkgs.gptfdisk
       ];
       nix.settings.substituters = lib.mkForce [ ];
     };
@@ -110,7 +113,22 @@ pkgs.testers.runNixOSTest {
         installer.fail("${installEnv} NB_USER=Alice nixbook-install < /dev/null")
         installer.fail("${installEnv} NB_FULLNAME=a:b nixbook-install < /dev/null")
         installer.fail("test -e /dev/nvme0n1p1")
+        # an earlier install with the same layout and passphrase, still open
+        # and mounted, as after a failed attempt
+        installer.succeed(
+            "sgdisk -n 1:0:+1G -t 1:EF00 -c 1:disk-main-ESP -n 2:0:0 -c 2:disk-main-luks /dev/nvme0n1",
+            "udevadm settle",
+            "printf %s '${luks}' > /tmp/old.key",
+            "cryptsetup -q luksFormat --pbkdf pbkdf2 --key-file /tmp/old.key /dev/nvme0n1p2",
+            "cryptsetup open --key-file /tmp/old.key /dev/nvme0n1p2 cryptroot",
+            "mkfs.btrfs -q -f -L nixos /dev/mapper/cryptroot",
+            "mount /dev/mapper/cryptroot /mnt",
+            "btrfs subvolume create /mnt/@nix",
+            "mkdir -p /mnt/@nix/var/nix/db",
+            "touch /mnt/@nix/var/nix/db/from-the-old-install",
+        )
         print(installer.succeed("${installEnv} nixbook-install 2>&1"))
+        installer.fail("test -e /mnt/nix/var/nix/db/from-the-old-install")
         installer.succeed("test ! -e /tmp/nixbook-luks.key")
         installer.succeed("cryptsetup luksDump /dev/nvme0n1p2 | grep -q 'Version:.*2'")
         installer.succeed("cryptsetup luksDump /dev/nvme0n1p2 | grep -q argon2id")

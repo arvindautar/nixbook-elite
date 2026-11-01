@@ -12,6 +12,8 @@ pkgs.writeShellApplication {
   runtimeInputs = with pkgs; [
     util-linux
     coreutils
+    cryptsetup
+    btrfs-progs
     nixos-install-tools
   ];
   text =

@@ -188,7 +188,9 @@ You need the EliteBook, a USB stick of 8 GB or more, and a machine with Nix
    ```
    It asks for a username, full name, password (8+ characters) and a disk
    passphrase (12+ characters, a few words works well). Type `WISSEN` to
-   erase `/dev/nvme0n1` and install.
+   erase `/dev/nvme0n1` and install. A failed or older install on the disk is
+   cleared first. At the end everything is read back from the SSD; if that
+   fails the installer stops, and the SSD and RAM need checking first.
 
 4. First boots:
    - Unlock the disk with the passphrase and log in with the account from the
@@ -276,7 +278,8 @@ has to stay silent on it.
 
 The test runs offline in QEMU and takes about 5 minutes once everything is
 built. It runs the installer (including the cases it has to refuse before
-touching the disk), boots the result with Secure Boot firmware in Setup Mode,
+touching the disk, and over an earlier install that's still mounted), boots
+the result with Secure Boot firmware in Setup Mode,
 lets lanzaboote enroll its keys and checks for `Secure Boot: enabled (user)`.
 Then it goes through the installed system: accounts and groups (also an admin
 created the way GNOME Settings does it), rootless containers, the disk layout,
