@@ -75,6 +75,7 @@
           inherit pkgs lib nixbook;
           flakeSource = self;
         };
+        privacy = import ./tests/privacy.nix { inherit pkgs lib; };
       };
 
       formatter.${system} = pkgs.nixfmt;

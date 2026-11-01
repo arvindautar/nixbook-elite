@@ -36,13 +36,14 @@ let
       ]
     }
     map=/var/lib/nixos/auto-subuid-map
+    # Before anything is written: activation and the path unit can run together.
+    exec 9>/run/nixbook-setup-accounts.lock
+    ${pkgs.util-linux}/bin/flock 9
     [ -s "$map" ] || echo '{}' > "$map"
     sed -i '/^$/d' /etc/subuid /etc/subgid
     # Accounts rewrites passwd and group a few times, and a path unit drops any
     # change that arrives while this script is still running. Stay until both
     # files have been quiet, so a new administrator is not left without groups.
-    exec 9>/run/nixbook-setup-accounts.lock
-    ${pkgs.util-linux}/bin/flock 9
     quiet=0
     while [ "$quiet" -lt 3 ]; do
       before=$(stat -c '%.9Y %.9Z' /etc/passwd /etc/group)

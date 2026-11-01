@@ -9,6 +9,10 @@ let
   # fonts-dejavu-mono 2.37-8build1, and fonts-noto-cjk 20240730+repack1-1build1.
   # Left out are 51-local.conf, whose place `nixbook` takes, and
   # fonts-ubuntu's 71-ubuntulegacy.conf, which only hides Ubuntu fonts.
+  # These stay in the folder, so it still compares with Ubuntu, but aren't
+  # loaded. They only concern fonts this laptop doesn't have, and leaving them
+  # out changes no font choice: 20-unhint-small-dejavu-lgc-*, 20-unhint-small-vera,
+  # 65-fonts-persian, 69-unifont and 80-delicious. Add one back with its font.
   ubuntuFile = name: builtins.readFile (./fontconfig-ubuntu + "/${name}");
   ubuntu =
     name:
@@ -50,9 +54,6 @@ let
     <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
     <fontconfig>
     ${lib.concatMapStrings ubuntu [
-      "20-unhint-small-dejavu-lgc-sans"
-      "20-unhint-small-dejavu-lgc-sans-mono"
-      "20-unhint-small-dejavu-lgc-serif"
       "20-unhint-small-dejavu-sans"
       "20-unhint-small-dejavu-sans-mono"
       "20-unhint-small-dejavu-serif"
@@ -91,13 +92,9 @@ let
         "10-sub-pixel-rgb"
         "10-yes-antialias"
         "11-lcdfilter-default"
-        "20-unhint-small-dejavu-lgc-sans"
-        "20-unhint-small-dejavu-lgc-sans-mono"
-        "20-unhint-small-dejavu-lgc-serif"
         "20-unhint-small-dejavu-sans"
         "20-unhint-small-dejavu-sans-mono"
         "20-unhint-small-dejavu-serif"
-        "20-unhint-small-vera"
         "30-metric-aliases"
         "40-nonlatin"
         "45-generic"
@@ -115,12 +112,9 @@ let
         "58-dejavu-lgc-serif"
         "60-generic"
         "60-latin"
-        "65-fonts-persian"
         "65-nonlatin"
-        "69-unifont"
         "70-fonts-noto-cjk"
         "70-no-bitmaps-except-emoji"
-        "80-delicious"
         "90-synthetic"
       ];
     in

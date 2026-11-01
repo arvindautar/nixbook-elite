@@ -20,7 +20,10 @@
       download-buffer-size = 268435456;
     };
     # dedupe weekly instead of on every build
-    optimise.automatic = true;
+    optimise = {
+      automatic = true;
+      dates = [ "weekly" ]; # the default is every day
+    };
     # keep builds from making the desktop stutter
     daemonCPUSchedPolicy = "idle";
     daemonIOSchedClass = "idle";

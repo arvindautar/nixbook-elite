@@ -12,23 +12,31 @@
     };
     ethernet.macAddress = "stable";
     settings = {
+      # NetworkManager reads these as numbers and silently ignores anything else,
+      # so `false` still sends the hostname. tests/privacy.nix watches the wire.
       connection = {
-        "ipv4.dhcp-send-hostname" = false;
-        "ipv6.dhcp-send-hostname" = false;
+        "ipv4.dhcp-send-hostname" = 0;
+        "ipv6.dhcp-send-hostname" = 0;
         "ipv6.ip6-privacy" = 2;
-        "ipv6.addr-gen-mode" = "stable-privacy";
+        "ipv6.addr-gen-mode" = 1; # stable-privacy
         # the default DUID comes from machine-id, i.e. the same on every network
         "ipv6.dhcp-duid" = "stable-uuid";
+        # same idea for the other DHCP identifiers: one per network
+        "ipv4.dhcp-client-id" = "stable";
+        "ipv6.dhcp-iaid" = "stable";
         "connection.llmnr" = 0;
         # avahi does mDNS (printers)
         "connection.mdns" = 0;
       };
+      # a network can't name this laptop through DHCP
+      main.hostname-mode = "none";
       # no connectivity check pings
       connectivity.enabled = false;
     };
     dns = "systemd-resolved";
     # Wi-Fi only. Also covers USB-C docks/monitors with a network port and USB
-    # tethering. Remove to use a cable again.
+    # tethering. Power and display over USB-C aren't affected. Remove to use a
+    # cable again.
     unmanaged = [ "type:ethernet" ];
   };
 

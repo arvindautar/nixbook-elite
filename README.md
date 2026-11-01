@@ -194,7 +194,7 @@ local changes before it updates.
 ## Layout
 
 ```
-flake.nix                  the system, the installer ISO and the VM test
+flake.nix                  the system, the installer ISO and the VM tests
 hosts/elitebook/
   default.nix              module list, hostname
   hardware.nix             EliteBook 840 G10 hardware
@@ -205,7 +205,7 @@ installer/
 modules/
   base.nix                 Nix, locale, printing
   fonts.nix                Ubuntu 26.04's font matching, also in Flatpaks; Adwaita Sans UI (Noto Sans in the browsers), JetBrainsMono Nerd Font
-  fontconfig-ubuntu/       Ubuntu 26.04's fontconfig files, unchanged
+  fontconfig-ubuntu/       Ubuntu 26.04's fontconfig files, unchanged; fonts.nix skips the ones for fonts this laptop doesn't have
   accounts.nix             groups and subuid ranges for every account
   boot.nix                 lanzaboote, kernel, quiet boot
   desktop.nix              GNOME, apps, Brave policies, defaults
@@ -215,6 +215,7 @@ modules/
   backup.nix, recovery.nix snapshots, restic, key and header backup
   virtualisation.nix, ai.nix, nordvpn.nix, spelling.nix, extensions.nix
 tests/install.nix          offline end-to-end install test
+tests/privacy.nix          what the laptop sends a DHCP server, read from the wire
 ```
 
 Accounts aren't in the flake. The installer creates the first one (an admin)
@@ -234,8 +235,15 @@ to `/etc/hostname` on the first rebuild.
 nix build .#toplevel                          # the system
 nix build .#iso                               # the installer ISO
 nix build .#checks.x86_64-linux.install -L    # end-to-end test (needs KVM)
+nix build .#checks.x86_64-linux.privacy -L    # DHCP privacy test (needs KVM)
 nix fmt
 ```
+
+The privacy test boots `privacy.nix` next to a DHCP server and captures the
+traffic, to check that the hostname really stays off the wire. A second run
+with the hostname switched on proves the capture would have shown it. A third
+machine with a live network cable, like a USB-C monitor's port at the office,
+has to stay silent on it.
 
 The test runs offline in QEMU and takes about 5 minutes once everything is
 built. It runs the installer (including the cases it has to refuse before
